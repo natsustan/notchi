@@ -1,5 +1,16 @@
 import Foundation
 
+private let promptMaxLength = 100
+
+extension String {
+    func truncatedForPrompt() -> String {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > promptMaxLength else { return trimmed }
+        let index = trimmed.index(trimmed.startIndex, offsetBy: promptMaxLength)
+        return String(trimmed[..<index]) + "..."
+    }
+}
+
 enum ToolStatus {
     case running
     case success
@@ -66,6 +77,7 @@ final class SessionStats {
     var recentEvents: [SessionEvent] = []
     private(set) var formattedDuration: String = "0m 00s"
     private(set) var isProcessing: Bool = false
+    private(set) var lastUserPrompt: String?
 
     private var durationTimer: Task<Void, Never>?
     private static let maxEvents = 20
@@ -117,12 +129,17 @@ final class SessionStats {
         }
     }
 
+    func recordUserPrompt(_ text: String) {
+        lastUserPrompt = text.truncatedForPrompt()
+    }
+
     func startSession() {
         sessionStartTime = Date()
         eventCount = 0
         recentEvents = []
         formattedDuration = "0m 00s"
         isProcessing = true
+        lastUserPrompt = nil
         startDurationTimer()
     }
 

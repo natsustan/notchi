@@ -10,12 +10,14 @@ struct HookEvent: Decodable, Sendable {
     let tool: String?
     let toolInput: [String: AnyCodable]?
     let toolUseId: String?
+    let userPrompt: String?
 
     enum CodingKeys: String, CodingKey {
         case sessionId = "session_id"
         case cwd, event, status, pid, tty, tool
         case toolInput = "tool_input"
         case toolUseId = "tool_use_id"
+        case userPrompt = "user_prompt"
     }
 }
 

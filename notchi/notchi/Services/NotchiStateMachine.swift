@@ -27,6 +27,9 @@ final class NotchiStateMachine {
 
         switch event.event {
         case "UserPromptSubmit":
+            if let prompt = event.userPrompt {
+                stats.recordUserPrompt(prompt)
+            }
             transition(to: .thinking)
 
         case "PreCompact":

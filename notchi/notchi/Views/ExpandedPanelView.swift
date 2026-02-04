@@ -17,7 +17,7 @@ struct ExpandedPanelView: View {
     }
 
     private var hasActivity: Bool {
-        !stats.recentEvents.isEmpty || stats.isProcessing || showIndicator
+        !stats.recentEvents.isEmpty || stats.isProcessing || showIndicator || stats.lastUserPrompt != nil
     }
 
     var body: some View {
@@ -73,6 +73,12 @@ struct ExpandedPanelView: View {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
+                        if let prompt = stats.lastUserPrompt {
+                            UserPromptBubbleView(text: prompt)
+                                .frame(maxWidth: .infinity, alignment: .trailing)
+                                .padding(.bottom, 8)
+                        }
+
                         ForEach(stats.recentEvents) { event in
                             ActivityRowView(event: event)
                                 .id(event.id)

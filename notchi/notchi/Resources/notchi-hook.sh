@@ -40,6 +40,12 @@ output = {
     'tty': None
 }
 
+# Pass user prompt directly for UserPromptSubmit
+if hook_event == 'UserPromptSubmit':
+    prompt = input_data.get('prompt', '')
+    if prompt:
+        output['user_prompt'] = prompt
+
 tool = input_data.get('tool_name', '')
 if tool:
     output['tool'] = tool
