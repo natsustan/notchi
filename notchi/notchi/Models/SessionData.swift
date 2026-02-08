@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "com.ruban.notchi", category: "SessionData")
 
 @MainActor
 @Observable
@@ -46,7 +49,6 @@ final class SessionData: Identifiable {
     }
 
     var activityPreview: String? {
-        print("[SessionData \(id.prefix(8))] activityPreview: events=\(recentEvents.count), messages=\(recentAssistantMessages.count)")
         if let lastEvent = recentEvents.last {
             return lastEvent.description ?? lastEvent.tool ?? lastEvent.type
         }
@@ -80,6 +82,7 @@ final class SessionData: Identifiable {
         lastUserPrompt = prompt.truncatedForPrompt()
         promptSubmitTime = now
         lastActivity = now
+        logger.debug("Setting promptSubmitTime to: \(now)")
     }
 
     func updatePermissionMode(_ mode: String) {
@@ -123,17 +126,14 @@ final class SessionData: Identifiable {
     }
 
     func recordAssistantMessages(_ messages: [AssistantMessage]) {
-        print("[SessionData \(id.prefix(8))] Recording \(messages.count) messages, had \(recentAssistantMessages.count)")
         recentAssistantMessages.append(contentsOf: messages)
         while recentAssistantMessages.count > Self.maxAssistantMessages {
             recentAssistantMessages.removeFirst()
         }
-        print("[SessionData \(id.prefix(8))] Now have \(recentAssistantMessages.count) messages")
         lastActivity = Date()
     }
 
     func clearAssistantMessages() {
-        print("[SessionData \(id.prefix(8))] CLEARING messages (had \(recentAssistantMessages.count))")
         recentAssistantMessages = []
     }
 

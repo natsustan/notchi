@@ -18,8 +18,7 @@ actor ConversationParser {
     private var seenMessageIds: [String: Set<String>] = [:]
 
     /// Parse only NEW assistant text messages since last call
-    /// - Parameter after: Only return messages with timestamps after this date (filters out old messages from previous prompts)
-    func parseIncremental(sessionId: String, cwd: String, after: Date? = nil) -> [AssistantMessage] {
+    func parseIncremental(sessionId: String, cwd: String) -> [AssistantMessage] {
         let sessionFile = Self.sessionFilePath(sessionId: sessionId, cwd: cwd)
 
         guard FileManager.default.fileExists(atPath: sessionFile) else {
@@ -44,7 +43,7 @@ actor ConversationParser {
         if fileSize < lastOffset {
             lastFileOffset[sessionId] = 0
             seenMessageIds[sessionId] = []
-            return parseIncremental(sessionId: sessionId, cwd: cwd, after: after)
+            return parseIncremental(sessionId: sessionId, cwd: cwd)
         }
 
         // No new content
@@ -123,10 +122,13 @@ actor ConversationParser {
             // Only add if we have text content
             guard !textParts.isEmpty else { continue }
 
-            seen.insert(uuid)
+            // Note: We no longer filter by promptSubmitTime here.
+            // clearAssistantMessages() is called on new prompts, so old messages
+            // are already cleared. The timestamp filter caused issues due to
+            // clock skew between Notchi (Date()) and Claude's JSONL timestamps.
 
-            // Filter out messages from before the prompt was submitted
-            if let after, timestamp <= after { continue }
+            // Only mark as seen AFTER passing all filters
+            seen.insert(uuid)
 
             let fullText = textParts.joined(separator: "\n")
             messages.append(AssistantMessage(
@@ -146,6 +148,23 @@ actor ConversationParser {
     func resetState(for sessionId: String) {
         lastFileOffset.removeValue(forKey: sessionId)
         seenMessageIds.removeValue(forKey: sessionId)
+    }
+
+    /// Mark current file position as "already processed"
+    /// Call this when a new prompt is submitted to ignore previous content
+    func markCurrentPosition(sessionId: String, cwd: String) {
+        let sessionFile = Self.sessionFilePath(sessionId: sessionId, cwd: cwd)
+
+        guard let fileHandle = FileHandle(forReadingAtPath: sessionFile) else {
+            lastFileOffset[sessionId] = 0
+            seenMessageIds[sessionId] = []
+            return
+        }
+        defer { try? fileHandle.close() }
+
+        let fileSize = (try? fileHandle.seekToEnd()) ?? 0
+        lastFileOffset[sessionId] = fileSize
+        seenMessageIds[sessionId] = []
     }
 
     /// Build session file path from sessionId and cwd

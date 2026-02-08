@@ -46,18 +46,27 @@ struct AssistantTextRowView: View {
     }
 
     private var isTruncatable: Bool {
-        cleanedText.count > Self.maxDisplayLength
+        cleanedText.count > Self.maxDisplayLength || cleanedText.contains("\n")
     }
 
     private var cleanedText: String {
-        message.text
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .replacingOccurrences(of: "\n", with: " ")
+        message.text.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var truncatedText: String {
-        guard cleanedText.count > Self.maxDisplayLength else { return cleanedText }
-        let index = cleanedText.index(cleanedText.startIndex, offsetBy: Self.maxDisplayLength)
-        return String(cleanedText[..<index]) + "..."
+        var text = cleanedText
+
+        // Truncate at first newline if present
+        if let newlineIndex = text.firstIndex(of: "\n") {
+            text = String(text[..<newlineIndex])
+        }
+
+        // Truncate at max length if still too long
+        if text.count > Self.maxDisplayLength {
+            let index = text.index(text.startIndex, offsetBy: Self.maxDisplayLength)
+            text = String(text[..<index]) + "..."
+        }
+
+        return text
     }
 }
