@@ -119,7 +119,8 @@ final class SessionStore {
 
         let sessionNumber = nextSessionNumber
         nextSessionNumber += 1
-        let session = SessionData(sessionId: sessionId, cwd: cwd, sessionNumber: sessionNumber)
+        let existingXPositions = sessions.values.map(\.spriteXPosition)
+        let session = SessionData(sessionId: sessionId, cwd: cwd, sessionNumber: sessionNumber, existingXPositions: existingXPositions)
         sessions[sessionId] = session
         logger.info("Created session #\(sessionNumber): \(sessionId, privacy: .public) at \(cwd, privacy: .public)")
 

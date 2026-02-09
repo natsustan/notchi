@@ -4,9 +4,6 @@ struct GrassIslandView: View {
     let sessions: [SessionData]
 
     private let patchWidth: CGFloat = 80
-    private let spriteSpreadWidth: CGFloat = 0.7
-    private let spriteLeftMargin: CGFloat = 0.15
-    private let spriteJitterFactor: CGFloat = 0.5
 
     var body: some View {
         GeometryReader { geometry in
@@ -23,12 +20,14 @@ struct GrassIslandView: View {
                 .frame(width: geometry.size.width, alignment: .leading)
 
                 if sessions.isEmpty {
-                    GrassSpriteView(state: .idle, xPosition: 0.5, totalWidth: geometry.size.width)
+                    GrassSpriteView(state: .idle, xPosition: 0.5, yOffset: -15, totalWidth: geometry.size.width)
                 } else {
-                    ForEach(Array(sessions.enumerated()), id: \.element.id) { index, session in
+                    // Sorted far-to-near so closer sprites paint on top
+                    ForEach(depthSortedSessions) { session in
                         GrassSpriteView(
                             state: session.state,
-                            xPosition: spritePosition(for: session.id, index: index, total: sessions.count),
+                            xPosition: session.spriteXPosition,
+                            yOffset: session.spriteYOffset,
                             totalWidth: geometry.size.width
                         )
                     }
@@ -39,30 +38,31 @@ struct GrassIslandView: View {
         .clipped()
     }
 
-    private func patchCount(for width: CGFloat) -> Int {
-        Int(ceil(width / patchWidth)) + 1
+    private var depthSortedSessions: [SessionData] {
+        sessions.sorted { $0.spriteYOffset < $1.spriteYOffset }
     }
 
-    private func spritePosition(for sessionId: String, index: Int, total: Int) -> CGFloat {
-        let segmentWidth = spriteSpreadWidth / CGFloat(max(total, 1))
-        let basePosition = spriteLeftMargin + (CGFloat(index) * segmentWidth)
-        let hash = abs(sessionId.hashValue)
-        let jitter = CGFloat(hash % 100) / 100.0 * segmentWidth * spriteJitterFactor
-        return basePosition + jitter
+    private func patchCount(for width: CGFloat) -> Int {
+        Int(ceil(width / patchWidth)) + 1
     }
 }
 
 private struct GrassSpriteView: View {
     let state: NotchiState
     let xPosition: CGFloat
+    let yOffset: CGFloat
     let totalWidth: CGFloat
 
     @State private var isSwayingRight = true
     @State private var isBobUp = true
 
     private let spriteSize: CGFloat = 64
-    private let spriteYOffset: CGFloat = -15
     private let swayDuration: Double = 2.0
+    private let bobAmplitude: CGFloat = 2
+
+    // Must match SessionData's xPositionMin/xPositionRange contract
+    private let usableWidthFraction: CGFloat = 0.8
+    private let leftMarginFraction: CGFloat = 0.1
 
     var body: some View {
         SpriteSheetView(
@@ -74,7 +74,7 @@ private struct GrassSpriteView: View {
         )
         .frame(width: spriteSize, height: spriteSize)
         .rotationEffect(.degrees(isSwayingRight ? state.swayAmplitude : -state.swayAmplitude), anchor: .bottom)
-        .offset(x: xOffset, y: spriteYOffset + (isBobUp ? -2 : 2))
+        .offset(x: xOffset, y: yOffset + (isBobUp ? -bobAmplitude : bobAmplitude))
         .onAppear {
             startSwayAnimation()
             startBobAnimation()
@@ -85,8 +85,8 @@ private struct GrassSpriteView: View {
     }
 
     private var xOffset: CGFloat {
-        let usableWidth = totalWidth * 0.8
-        let leftMargin = totalWidth * 0.1
+        let usableWidth = totalWidth * usableWidthFraction
+        let leftMargin = totalWidth * leftMarginFraction
         return leftMargin + (xPosition * usableWidth) - (totalWidth / 2)
     }
 
