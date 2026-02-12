@@ -35,6 +35,9 @@ struct UsageBarView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)
+            .padding(.top, 3)
+            .padding(.leading, 2)
+            .padding(.bottom, -7)
         } else {
             connectedView
         }

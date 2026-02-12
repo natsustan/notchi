@@ -113,7 +113,7 @@ struct ExpandedPanelView: View {
             }
             .padding(.horizontal, 12)
         }
-        .padding(.bottom, 8)
+        .padding(.bottom, 5)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
@@ -154,7 +154,7 @@ struct ExpandedPanelView: View {
             }
             .padding(.horizontal, 12)
         }
-        .padding(.bottom, 3)
+        .padding(.bottom, 5)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
