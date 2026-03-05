@@ -8,7 +8,7 @@ enum NotchiTask: String, CaseIterable {
         case .compacting: return 6.0
         case .sleeping: return 2.0
         case .idle, .waiting: return 3.0
-        default: return 4.0
+        case .working: return 4.0
         }
     }
 
@@ -92,24 +92,16 @@ struct NotchiState: Equatable {
     var task: NotchiTask
     var emotion: NotchiEmotion = .neutral
 
-    private static let sobFrameCount = 5
-    private static let sobColumns = 5
-
     /// Resolves the sprite sheet name with fallback chain: exact emotion -> sad (for sob) -> neutral.
-    /// Returns the resolved name and whether the sob-specific sheet was found.
-    private var resolvedSprite: (name: String, isSob: Bool) {
+    var spriteSheetName: String {
         let name = "\(task.spritePrefix)_\(emotion.rawValue)"
-        if NSImage(named: name) != nil {
-            return (name, emotion == .sob)
-        }
+        if NSImage(named: name) != nil { return name }
         if emotion == .sob {
             let sadName = "\(task.spritePrefix)_sad"
-            if NSImage(named: sadName) != nil { return (sadName, false) }
+            if NSImage(named: sadName) != nil { return sadName }
         }
-        return ("\(task.spritePrefix)_neutral", false)
+        return "\(task.spritePrefix)_neutral"
     }
-
-    var spriteSheetName: String { resolvedSprite.name }
     var animationFPS: Double { task.animationFPS }
     var bobDuration: Double { task.bobDuration }
     var bobAmplitude: CGFloat {
@@ -123,8 +115,8 @@ struct NotchiState: Equatable {
     var canWalk: Bool { emotion == .sob ? false : task.canWalk }
     var displayName: String { task.displayName }
     var walkFrequencyRange: ClosedRange<Double> { task.walkFrequencyRange }
-    var frameCount: Int { resolvedSprite.isSob ? Self.sobFrameCount : task.frameCount }
-    var columns: Int { resolvedSprite.isSob ? Self.sobColumns : task.columns }
+    var frameCount: Int { task.frameCount }
+    var columns: Int { task.columns }
 
     static let idle = NotchiState(task: .idle)
     static let working = NotchiState(task: .working)
