@@ -168,11 +168,13 @@ jobs:
         env:
           VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
+          cp docs/appcast.xml /tmp/appcast.xml
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git fetch origin main
           git checkout main
-          git pull --rebase origin main
+          git pull origin main
+          cp /tmp/appcast.xml docs/appcast.xml
           git add docs/appcast.xml
-          git commit -m "chore: update appcast for v$VERSION"
+          git diff --cached --quiet && echo "No appcast changes" || git commit -m "chore: update appcast for v$VERSION"
           git push origin main
