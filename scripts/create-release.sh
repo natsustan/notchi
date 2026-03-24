@@ -95,6 +95,7 @@ fi
 
 DMG_NAME="${APP_NAME}-${VERSION}.dmg"
 DMG_PATH="${BUILD_DIR}/${DMG_NAME}"
+DMG_SHA256_PATH="${BUILD_DIR}/${APP_NAME}-${VERSION}.sha256"
 RELEASE_NOTES_SOURCE="docs/release-notes/${VERSION}.md"
 RELEASE_NOTES_ASSET="${BUILD_DIR}/${APP_NAME}-${VERSION}.md"
 
@@ -244,6 +245,12 @@ fi
 
 echo "Created ${DMG_PATH}"
 
+DMG_SHA256=$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')
+printf '%s\n' "$DMG_SHA256" > "$DMG_SHA256_PATH"
+echo "DMG SHA-256:"
+echo "$DMG_SHA256"
+echo "Checksum written to ${DMG_SHA256_PATH}"
+
 cp "$RELEASE_NOTES_SOURCE" "$RELEASE_NOTES_ASSET"
 echo "Prepared release notes asset at ${RELEASE_NOTES_ASSET}"
 
@@ -309,6 +316,7 @@ step "Release v${VERSION} built successfully!"
 
 echo "Files:"
 echo "  DMG:     ${DMG_PATH}"
+echo "  SHA256:  ${DMG_SHA256_PATH}"
 echo "  Notes:   ${RELEASE_NOTES_ASSET}"
 echo "  Appcast: ${APPCAST_OUTPUT}"
 echo ""

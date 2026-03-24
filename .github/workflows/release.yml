@@ -186,6 +186,20 @@ jobs:
           hdiutil create -volname "Notchi" -srcfolder "$DMG_DIR" \
             -ov -format UDZO "$RUNNER_TEMP/Notchi-$VERSION.dmg"
 
+      - name: Write DMG checksum
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+        run: |
+          SHASUM=$(shasum -a 256 "$RUNNER_TEMP/Notchi-$VERSION.dmg" | awk '{print $1}')
+          printf '%s\n' "$SHASUM" > "$RUNNER_TEMP/Notchi-$VERSION.sha256"
+
+          {
+            echo "## Release checksum"
+            echo
+            echo "\`Notchi-$VERSION.dmg\` SHA-256:"
+            echo "\`$SHASUM\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Write Sparkle key to temp file
         env:
           SPARKLE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
@@ -231,6 +245,7 @@ jobs:
         with:
           files: |
             ${{ runner.temp }}/Notchi-${{ steps.version.outputs.VERSION }}.dmg
+            ${{ runner.temp }}/Notchi-${{ steps.version.outputs.VERSION }}.sha256
             ${{ runner.temp }}/Notchi-${{ steps.version.outputs.VERSION }}.md
           body_path: ${{ runner.temp }}/Notchi-${{ steps.version.outputs.VERSION }}.md
 
