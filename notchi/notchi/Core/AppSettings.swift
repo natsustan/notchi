@@ -29,7 +29,7 @@ struct AppSettings {
     }
 
     static var anthropicApiKey: String? {
-        get { KeychainManager.getAnthropicApiKey() }
+        get { KeychainManager.getAnthropicApiKey(allowInteraction: true) }
         set { KeychainManager.setAnthropicApiKey(newValue) }
     }
 
