@@ -28,6 +28,9 @@ struct GrassIslandView: View {
     let sessions: [SessionData]
     var selectedSessionId: String?
     var hoveredSessionId: String?
+    var handoffSessionId: String?
+    var handoffProgress: CGFloat = 1
+    var isHandoffCollapsing = false
 
     var body: some View {
         GeometryReader { geometry in
@@ -36,9 +39,7 @@ struct GrassIslandView: View {
                     .fill(grassPaint(for: geometry.size))
                     .frame(width: geometry.size.width, height: geometry.size.height)
 
-                if sessions.isEmpty {
-                    GrassSpriteView(state: .idle, xPosition: 0.5, yOffset: -15, totalWidth: geometry.size.width, glowOpacity: 0)
-                } else {
+                if !sessions.isEmpty {
                     ForEach(SpriteLayout.depthSorted(sessions)) { session in
                         GrassSpriteView(
                             state: session.state,
@@ -47,6 +48,8 @@ struct GrassIslandView: View {
                             totalWidth: geometry.size.width,
                             glowOpacity: glowOpacity(for: session.id)
                         )
+                        .opacity(spriteOpacity(for: session.id))
+                        .blur(radius: spriteBlur(for: session.id))
                     }
                 }
             }
@@ -60,6 +63,22 @@ struct GrassIslandView: View {
         if sessionId == selectedSessionId { return 0.7 }
         if sessionId == hoveredSessionId { return 0.3 }
         return 0
+    }
+
+    private func spriteOpacity(for sessionId: String) -> Double {
+        guard sessionId == handoffSessionId else { return 1 }
+        return SpriteHandoffVisuals.opacity(
+            for: handoffProgress,
+            isSource: isHandoffCollapsing
+        )
+    }
+
+    private func spriteBlur(for sessionId: String) -> CGFloat {
+        guard sessionId == handoffSessionId else { return 0 }
+        return SpriteHandoffVisuals.blur(
+            for: handoffProgress,
+            isSource: isHandoffCollapsing
+        )
     }
 
     private func grassPaint(for size: CGSize) -> ImagePaint {
@@ -93,6 +112,9 @@ struct GrassTapOverlay: View {
     let sessions: [SessionData]
     var selectedSessionId: String?
     @Binding var hoveredSessionId: String?
+    var handoffSessionId: String?
+    var handoffProgress: CGFloat = 1
+    var isHandoffCollapsing = false
     var onSelectSession: ((String) -> Void)?
 
     var body: some View {
@@ -102,19 +124,29 @@ struct GrassTapOverlay: View {
 
                 if !sessions.isEmpty {
                     ForEach(SpriteLayout.depthSorted(sessions)) { session in
-                        SpriteTapTarget(
-                            sessionId: session.id,
-                            xPosition: session.spriteXPosition,
-                            yOffset: session.spriteYOffset,
-                            totalWidth: geometry.size.width,
-                            hoveredSessionId: $hoveredSessionId,
-                            onTap: { onSelectSession?(session.id) }
-                        )
+                        if shouldAllowInteraction(for: session.id) {
+                            SpriteTapTarget(
+                                sessionId: session.id,
+                                xPosition: session.spriteXPosition,
+                                yOffset: session.spriteYOffset,
+                                totalWidth: geometry.size.width,
+                                hoveredSessionId: $hoveredSessionId,
+                                onTap: { onSelectSession?(session.id) }
+                            )
+                        }
                     }
                 }
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .bottom)
         }
+    }
+
+    private func shouldAllowInteraction(for sessionId: String) -> Bool {
+        guard sessionId == handoffSessionId else { return true }
+        return SpriteHandoffVisuals.isInteractive(
+            for: handoffProgress,
+            isCollapsing: isHandoffCollapsing
+        )
     }
 }
 
@@ -216,7 +248,8 @@ private struct GrassSpriteView: View {
             }
             .rotationEffect(.degrees(swayDegrees(at: timeline.date)), anchor: .bottom)
             .offset(
-                x: SpriteLayout.xOffset(xPosition: xPosition, totalWidth: totalWidth) + trembleOffset(at: timeline.date, amplitude: state.emotion == .sob ? Self.sobTrembleAmplitude : 0),
+                x: SpriteLayout.xOffset(xPosition: xPosition, totalWidth: totalWidth)
+                    + trembleOffset(at: timeline.date, amplitude: state.emotion == .sob ? Self.sobTrembleAmplitude : 0),
                 y: yOffset + bobOffset(at: timeline.date, duration: bobDuration, amplitude: bobAmplitude)
             )
         }

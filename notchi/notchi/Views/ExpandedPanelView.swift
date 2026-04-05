@@ -1,5 +1,82 @@
 import SwiftUI
 
+private struct PanelSwapTransitionModifier: ViewModifier {
+    let blur: CGFloat
+    let opacity: Double
+    let xOffset: CGFloat
+
+    static let identity = PanelSwapTransitionModifier(blur: 0, opacity: 1, xOffset: 0)
+
+    func body(content: Content) -> some View {
+        content
+            .blur(radius: blur)
+            .opacity(opacity)
+            .offset(x: xOffset)
+            .compositingGroup()
+    }
+}
+
+private struct MorphingText: View {
+    let text: String
+    let textFont: Font
+    let color: Color
+    var alignment: TextAlignment = .leading
+    var lineLimit: Int? = 1
+
+    @State private var displayedText: String
+    @State private var blurProgress: CGFloat = 0
+    @State private var morphGeneration = 0
+
+    init(
+        text: String,
+        font: Font,
+        color: Color,
+        alignment: TextAlignment = .leading,
+        lineLimit: Int? = 1
+    ) {
+        self.text = text
+        self.textFont = font
+        self.color = color
+        self.alignment = alignment
+        self.lineLimit = lineLimit
+        _displayedText = State(initialValue: text)
+    }
+
+    var body: some View {
+        let baseText: Text = Text(displayedText).font(textFont)
+
+        return baseText
+            .foregroundColor(color)
+            .lineLimit(lineLimit)
+            .multilineTextAlignment(alignment)
+            // Blur out briefly so the hard string swap reads like a morph.
+            .blur(radius: blurProgress * 6)
+            .opacity(1 - (blurProgress * 0.18))
+            .compositingGroup()
+            .onChange(of: text) { _, newText in
+                guard newText != displayedText else { return }
+
+                morphGeneration += 1
+                let generation = morphGeneration
+
+                withAnimation(.easeOut(duration: 0.11)) {
+                    blurProgress = 1
+                }
+
+                Task { @MainActor in
+                    try? await Task.sleep(for: .milliseconds(70))
+                    guard generation == morphGeneration else { return }
+
+                    displayedText = newText
+
+                    withAnimation(.easeOut(duration: 0.18)) {
+                        blurProgress = 0
+                    }
+                }
+            }
+    }
+}
+
 enum ActivityItem: Identifiable {
     case tool(SessionEvent)
     case assistant(AssistantMessage)
@@ -58,23 +135,53 @@ struct ExpandedPanelView: View {
         sessionStore.activeSessionCount >= 2 && !showingSessionActivity
     }
 
+    private var primaryContentTransition: AnyTransition {
+        .asymmetric(
+            insertion: .modifier(
+                active: PanelSwapTransitionModifier(blur: 10, opacity: 0, xOffset: -18),
+                identity: .identity
+            )
+            .animation(.easeOut(duration: 0.22).delay(0.04)),
+            removal: .modifier(
+                active: PanelSwapTransitionModifier(blur: 8, opacity: 0, xOffset: -10),
+                identity: .identity
+            )
+            .animation(.easeIn(duration: 0.14))
+        )
+    }
+
+    private var settingsContentTransition: AnyTransition {
+        .asymmetric(
+            insertion: .modifier(
+                active: PanelSwapTransitionModifier(blur: 12, opacity: 0, xOffset: 22),
+                identity: .identity
+            )
+            .animation(.easeOut(duration: 0.22).delay(0.05)),
+            removal: .modifier(
+                active: PanelSwapTransitionModifier(blur: 8, opacity: 0, xOffset: 10),
+                identity: .identity
+            )
+            .animation(.easeIn(duration: 0.14))
+        )
+    }
+
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 if !showingSettings {
                     if shouldShowSessionPicker {
                         sessionPickerContent(geometry: geometry)
-                            .transition(.move(edge: .leading).combined(with: .opacity))
+                            .transition(primaryContentTransition)
                     } else {
                         activityContent(geometry: geometry)
-                            .transition(.move(edge: .leading).combined(with: .opacity))
+                            .transition(primaryContentTransition)
                     }
                 }
 
                 if showingSettings {
                     PanelSettingsView()
                         .frame(width: geometry.size.width)
-                        .transition(.move(edge: .trailing).combined(with: .opacity))
+                        .transition(settingsContentTransition)
                 }
             }
         }
@@ -188,9 +295,11 @@ struct ExpandedPanelView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         if let session = effectiveSession {
-                            Text("\(session.projectName) #\(session.sessionNumber)")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundColor(TerminalColors.secondaryText)
+                            MorphingText(
+                                text: "\(session.projectName) #\(session.sessionNumber)",
+                                font: .system(size: 11, weight: .medium),
+                                color: TerminalColors.secondaryText
+                            )
                         }
 
                         Spacer()
@@ -266,12 +375,19 @@ struct ExpandedPanelView: View {
             : "Open settings to set up Claude Code integration"
 
         return VStack(spacing: 8) {
-            Text(title)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(TerminalColors.secondaryText)
-            Text(subtitle)
-                .font(.system(size: 12))
-                .foregroundColor(TerminalColors.dimmedText)
+            MorphingText(
+                text: title,
+                font: .system(size: 14, weight: .medium),
+                color: TerminalColors.secondaryText,
+                alignment: .center
+            )
+            MorphingText(
+                text: subtitle,
+                font: .system(size: 12),
+                color: TerminalColors.dimmedText,
+                alignment: .center,
+                lineLimit: 2
+            )
         }
         .frame(maxWidth: .infinity)
     }
