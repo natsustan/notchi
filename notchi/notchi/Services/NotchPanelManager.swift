@@ -36,6 +36,8 @@ final class NotchPanelManager {
     private let hoverExitDelay: Duration
     private let activeSessionCountProvider: @MainActor () -> Int
     private let mouseLocationProvider: @MainActor () -> CGPoint
+    private let collapsedHoverEnterFeedback: @MainActor () -> Void
+    private let pinToggleFeedback: @MainActor () -> Void
 
     private var observerTokens: [NSObjectProtocol] = []
     private var cachedShouldUseCompactIdle = false
@@ -68,6 +70,8 @@ final class NotchPanelManager {
         hoverExitDelay: Duration = .zero,
         activeSessionCountProvider: @escaping @MainActor () -> Int = { SessionStore.shared.activeSessionCount },
         mouseLocationProvider: @escaping @MainActor () -> CGPoint = { NSEvent.mouseLocation },
+        collapsedHoverEnterFeedback: @escaping @MainActor () -> Void = { HapticService.shared.playHoverClick() },
+        pinToggleFeedback: @escaping @MainActor () -> Void = { HapticService.shared.playToggle() },
         startEventMonitors: Bool = true,
         observeExternalState: Bool = true
     ) {
@@ -76,6 +80,8 @@ final class NotchPanelManager {
         self.hoverExitDelay = hoverExitDelay
         self.activeSessionCountProvider = activeSessionCountProvider
         self.mouseLocationProvider = mouseLocationProvider
+        self.collapsedHoverEnterFeedback = collapsedHoverEnterFeedback
+        self.pinToggleFeedback = pinToggleFeedback
 
         if startEventMonitors {
             setupEventMonitors()
@@ -169,6 +175,7 @@ final class NotchPanelManager {
 
     func togglePin() {
         isPinned.toggle()
+        pinToggleFeedback()
     }
 
     private func handleCollapsedHoverEntered() {
@@ -306,5 +313,9 @@ final class NotchPanelManager {
     private func setCollapsedHovered(_ newValue: Bool) {
         guard isCollapsedHovered != newValue else { return }
         isCollapsedHovered = newValue
+
+        if newValue {
+            collapsedHoverEnterFeedback()
+        }
     }
 }

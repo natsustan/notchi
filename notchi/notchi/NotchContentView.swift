@@ -43,6 +43,7 @@ struct NotchContentView: View {
     var stateMachine: NotchiStateMachine = .shared
     var panelManager: NotchPanelManager = .shared
     var usageService: ClaudeUsageService = .shared
+    var haptics: HapticService = .shared
     @ObservedObject private var updateManager = UpdateManager.shared
     @State private var showingPanelSettings = false
     @State private var showingSessionActivity = false
@@ -236,9 +237,7 @@ struct NotchContentView: View {
                     handoffProgress: spriteHandoffProgress,
                     isHandoffCollapsing: spriteHandoff?.direction == .collapsing,
                     onSelectSession: { sessionId in
-                        guard sessionStore.activeSessionCount >= 2 else { return }
-                        sessionStore.selectSession(sessionId)
-                        showingSessionActivity = true
+                        selectGrassSession(sessionId)
                     }
                 )
                 .frame(height: grassHeight, alignment: .bottom)
@@ -376,6 +375,18 @@ struct NotchContentView: View {
         }
     }
 
+    private func selectGrassSession(_ sessionId: String) {
+        guard sessionStore.activeSessionCount >= 2 else { return }
+
+        let shouldPlayHaptic = sessionStore.selectedSessionId != sessionId || !showingSessionActivity
+        if shouldPlayHaptic {
+            haptics.playSessionSelection()
+        }
+
+        sessionStore.selectSession(sessionId)
+        showingSessionActivity = true
+    }
+
     @ViewBuilder
     private var headerRow: some View {
         if isCompactIdle {
@@ -438,6 +449,7 @@ struct NotchContentView: View {
     }
 
     private func toggleMute() {
+        haptics.playToggle()
         AppSettings.toggleMute()
         isMuted = AppSettings.isMuted
     }

@@ -20,6 +20,14 @@ final class NotchPanelManagerTests: XCTestCase {
         }
     }
 
+    private final class HoverFeedbackBox {
+        var count = 0
+    }
+
+    private final class PinFeedbackBox {
+        var count = 0
+    }
+
     private var defaultsSuiteNames: [String] = []
 
     override func tearDown() {
@@ -279,6 +287,54 @@ final class NotchPanelManagerTests: XCTestCase {
         XCTAssertFalse(manager.isCollapsedHovered)
     }
 
+    func testCollapsedHoverEnterFeedbackFiresOnlyOnDistinctEntries() async {
+        let defaults = makeDefaults()
+        defaults.set(false, forKey: AppSettings.minimizeWhenIdleKey)
+        let sessionCount = SessionCountBox(0)
+        let feedback = HoverFeedbackBox()
+        let manager = makeManager(
+            sessionCount: sessionCount,
+            defaults: defaults,
+            hoverExitDelay: .zero,
+            hoverFeedback: feedback
+        )
+
+        configureGeometry(for: manager)
+
+        let insidePoint = CGPoint(x: manager.notchRect.midX, y: manager.notchRect.midY)
+        let deeperInsidePoint = CGPoint(x: manager.notchRect.midX + 10, y: manager.notchRect.midY)
+
+        manager.handleMouseLocationChanged(insidePoint)
+        manager.handleMouseLocationChanged(deeperInsidePoint)
+
+        XCTAssertEqual(feedback.count, 1)
+
+        manager.handleMouseLocationChanged(outsideNotchPoint(for: manager))
+        manager.handleMouseLocationChanged(insidePoint)
+
+        XCTAssertEqual(feedback.count, 2)
+    }
+
+    func testPinToggleFeedbackFiresForEachToggle() async {
+        let defaults = makeDefaults()
+        defaults.set(false, forKey: AppSettings.minimizeWhenIdleKey)
+        let sessionCount = SessionCountBox(0)
+        let feedback = PinFeedbackBox()
+        let manager = makeManager(
+            sessionCount: sessionCount,
+            defaults: defaults,
+            pinFeedback: feedback
+        )
+
+        manager.togglePin()
+        XCTAssertTrue(manager.isPinned)
+        XCTAssertEqual(feedback.count, 1)
+
+        manager.togglePin()
+        XCTAssertFalse(manager.isPinned)
+        XCTAssertEqual(feedback.count, 2)
+    }
+
     private func makeDefaults() -> UserDefaults {
         let suiteName = "NotchPanelManagerTests-\(UUID().uuidString)"
         defaultsSuiteNames.append(suiteName)
@@ -307,7 +363,9 @@ final class NotchPanelManagerTests: XCTestCase {
         sessionCount: SessionCountBox,
         defaults: UserDefaults,
         hoverExitDelay: Duration = .milliseconds(10),
-        mouseLocation: MouseLocationBox? = nil
+        mouseLocation: MouseLocationBox? = nil,
+        hoverFeedback: HoverFeedbackBox? = nil,
+        pinFeedback: PinFeedbackBox? = nil
     ) -> NotchPanelManager {
         NotchPanelManager(
             notificationCenter: NotificationCenter(),
@@ -315,6 +373,12 @@ final class NotchPanelManagerTests: XCTestCase {
             hoverExitDelay: hoverExitDelay,
             activeSessionCountProvider: { sessionCount.value },
             mouseLocationProvider: { mouseLocation?.value ?? .zero },
+            collapsedHoverEnterFeedback: {
+                hoverFeedback?.count += 1
+            },
+            pinToggleFeedback: {
+                pinFeedback?.count += 1
+            },
             startEventMonitors: false,
             observeExternalState: false
         )
