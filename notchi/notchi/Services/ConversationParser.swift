@@ -15,6 +15,7 @@ struct ParseResult {
 
 actor ConversationParser {
     static let shared = ConversationParser()
+    static var projectsRootPath = "\(NSHomeDirectory())/.claude/projects"
 
     private var lastFileOffset: [String: UInt64] = [:]
     private var seenMessageIds: [String: Set<String>] = [:]
@@ -94,6 +95,9 @@ actor ConversationParser {
 
             guard let messageDict = json["message"] as? [String: Any] else { continue }
 
+            // Skip CLI-generated transcript entries that are not real model replies.
+            if messageDict["model"] as? String == "<synthetic>" { continue }
+
             // Parse timestamp
             let timestamp: Date
             if let timestampStr = json["timestamp"] as? String {
@@ -172,6 +176,6 @@ actor ConversationParser {
 
     static func sessionFilePath(sessionId: String, cwd: String) -> String {
         let projectDir = cwd.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
-        return "\(NSHomeDirectory())/.claude/projects/\(projectDir)/\(sessionId).jsonl"
+        return "\(projectsRootPath)/\(projectDir)/\(sessionId).jsonl"
     }
 }

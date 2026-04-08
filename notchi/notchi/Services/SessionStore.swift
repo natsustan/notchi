@@ -69,6 +69,7 @@ final class SessionStore {
             if let prompt = event.userPrompt {
                 session.recordUserPrompt(prompt)
             }
+            session.clearRecentEvents()
             session.clearAssistantMessages()
             session.clearPendingQuestions()
             if Self.isLocalSlashCommand(event.userPrompt) {

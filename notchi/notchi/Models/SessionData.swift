@@ -226,6 +226,10 @@ final class SessionData: Identifiable {
         recentAssistantMessages = []
     }
 
+    func clearRecentEvents() {
+        recentEvents = []
+    }
+
     func resetSleepTimer() {
         sleepTimer?.cancel()
         sleepTimer = Task {
