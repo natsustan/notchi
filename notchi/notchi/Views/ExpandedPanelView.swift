@@ -329,7 +329,13 @@ struct ExpandedPanelView: View {
                                         ActivityRowView(event: event)
                                             .id(item.id)
                                     case .assistant(let message):
-                                        AssistantTextRowView(message: message)
+                                        AssistantTextRowView(message: message) { isExpanded in
+                                            scrollActivityItem(
+                                                item.id,
+                                                expanded: isExpanded,
+                                                proxy: proxy
+                                            )
+                                        }
                                             .id(item.id)
                                     }
                                 }
@@ -393,6 +399,16 @@ struct ExpandedPanelView: View {
             )
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func scrollActivityItem(_ id: String, expanded: Bool, proxy: ScrollViewProxy) {
+        Task { @MainActor in
+            await Task.yield()
+            let anchor: UnitPoint = expanded ? .top : .bottom
+            withAnimation(.easeInOut(duration: 0.22)) {
+                proxy.scrollTo(id, anchor: anchor)
+            }
+        }
     }
 }
 
