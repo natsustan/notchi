@@ -225,6 +225,9 @@ struct ExpandedPanelView: View {
 
                     SessionListView(
                         sessions: sessionStore.sortedSessions,
+                        titleForSession: { session in
+                            sessionStore.displayTitle(for: session)
+                        },
                         selectedSessionId: sessionStore.selectedSessionId,
                         onSelectSession: { sessionId in
                             sessionStore.selectSession(sessionId)
@@ -299,7 +302,7 @@ struct ExpandedPanelView: View {
                     HStack {
                         if let session = effectiveSession {
                             MorphingText(
-                                text: "\(session.projectName) #\(session.sessionNumber)",
+                                text: sessionStore.displaySessionLabel(for: session),
                                 font: .system(size: 11, weight: .medium),
                                 color: TerminalColors.secondaryText
                             )

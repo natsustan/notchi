@@ -46,8 +46,47 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(session.lastUserPrompt, "second")
     }
 
+    func testDisplaySessionNumbersRenumberAfterDismissal() {
+        let store = SessionStore.shared
+        let cwd = "/tmp/notchi"
+
+        let first = store.process(makeEvent(
+            sessionId: "renumber-1-\(UUID().uuidString)",
+            cwd: cwd,
+            event: "UserPromptSubmit",
+            status: "processing",
+            userPrompt: "one"
+        ))
+        let second = store.process(makeEvent(
+            sessionId: "renumber-2-\(UUID().uuidString)",
+            cwd: cwd,
+            event: "UserPromptSubmit",
+            status: "processing",
+            userPrompt: "two"
+        ))
+        let third = store.process(makeEvent(
+            sessionId: "renumber-3-\(UUID().uuidString)",
+            cwd: cwd,
+            event: "UserPromptSubmit",
+            status: "processing",
+            userPrompt: "three"
+        ))
+
+        XCTAssertEqual(store.displaySessionNumber(for: first), 1)
+        XCTAssertEqual(store.displaySessionNumber(for: second), 2)
+        XCTAssertEqual(store.displaySessionNumber(for: third), 3)
+
+        store.dismissSession(first.id)
+        store.dismissSession(second.id)
+
+        XCTAssertEqual(store.displaySessionNumber(for: third), 1)
+        XCTAssertEqual(store.displaySessionLabel(for: third), "notchi #1")
+        XCTAssertEqual(store.displayTitle(for: third), "notchi #1 - three")
+    }
+
     private func makeEvent(
         sessionId: String,
+        cwd: String = "/tmp",
         event: String,
         status: String,
         userPrompt: String? = nil,
@@ -56,7 +95,7 @@ final class SessionStoreTests: XCTestCase {
     ) -> HookEvent {
         HookEvent(
             sessionId: sessionId,
-            cwd: "/tmp",
+            cwd: cwd,
             event: event,
             status: status,
             pid: nil,
