@@ -93,8 +93,198 @@ final class ClaudeUsageServiceTests: XCTestCase {
     override func tearDown() {
         AppSettings.isUsageEnabled = false
         AppSettings.claudeUsageRecoverySnapshot = nil
+        ClaudeConfigDirectoryResolver.resetTestingHooks()
         ClaudeCLIResolver.resetTestingHooks()
         super.tearDown()
+    }
+
+    func testClaudeConfigDirectoryResolverUsesProcessEnvironment() {
+        ClaudeConfigDirectoryResolver.testHooks = .init(
+            environment: { ["CLAUDE_CONFIG_DIR": "/tmp/claude-config"] },
+            isExecutableFile: { _ in false },
+            runProcess: { _, _, _ in
+                XCTFail("Shell probing should not run when the environment already provides CLAUDE_CONFIG_DIR")
+                return nil
+            }
+        )
+
+        let resolution = ClaudeConfigDirectoryResolver.resolve()
+
+        XCTAssertEqual(resolution.path, "/tmp/claude-config")
+        XCTAssertEqual(resolution.source, .environment)
+    }
+
+    func testClaudeConfigDirectoryResolverFallsBackToShell() {
+        var processCalls: [[String]] = []
+        ClaudeConfigDirectoryResolver.testHooks = .init(
+            environment: { ["SHELL": "/mock/zsh"] },
+            isExecutableFile: { path in
+                path == "/mock/zsh"
+            },
+            runProcess: { _, arguments, _ in
+                processCalls.append(arguments)
+                if arguments == ["-lc", "printf '%s' \"$CLAUDE_CONFIG_DIR\""] {
+                    return "/tmp/from-shell\n"
+                }
+                return nil
+            }
+        )
+
+        let resolution = ClaudeConfigDirectoryResolver.resolve()
+
+        XCTAssertEqual(resolution.path, "/tmp/from-shell")
+        XCTAssertEqual(resolution.source, .shell)
+        XCTAssertEqual(processCalls, [["-lc", "printf '%s' \"$CLAUDE_CONFIG_DIR\""]])
+    }
+
+    func testClaudeConfigDirectoryResolverExtractsPathFromNoisyShellOutput() {
+        ClaudeConfigDirectoryResolver.testHooks = .init(
+            environment: { ["SHELL": "/mock/zsh"] },
+            isExecutableFile: { path in
+                path == "/mock/zsh"
+            },
+            runProcess: { _, arguments, _ in
+                if arguments == ["-lc", "printf '%s' \"$CLAUDE_CONFIG_DIR\""] {
+                    return "/tmp/plugin-warning-path\n/tmp/from-shell\n"
+                }
+                return nil
+            }
+        )
+
+        let resolution = ClaudeConfigDirectoryResolver.resolve()
+
+        XCTAssertEqual(resolution.path, "/tmp/from-shell")
+        XCTAssertEqual(resolution.source, .shell)
+    }
+
+    func testClaudeConfigDirectoryResolverDoesNotCacheFallbackResults() {
+        var processCallCount = 0
+        ClaudeConfigDirectoryResolver.testHooks = .init(
+            environment: { ["SHELL": "/mock/zsh"] },
+            isExecutableFile: { path in
+                path == "/mock/zsh"
+            },
+            runProcess: { _, arguments, _ in
+                guard arguments == ["-lc", "printf '%s' \"$CLAUDE_CONFIG_DIR\""] ||
+                    arguments == ["-ic", "printf '%s' \"$CLAUDE_CONFIG_DIR\""] else {
+                    return nil
+                }
+
+                processCallCount += 1
+                if processCallCount <= 2 {
+                    return nil
+                }
+
+                if processCallCount == 3 {
+                    return "/tmp/from-shell\n"
+                }
+
+                return nil
+            }
+        )
+
+        let firstResolution = ClaudeConfigDirectoryResolver.resolve()
+        let secondResolution = ClaudeConfigDirectoryResolver.resolve()
+
+        XCTAssertEqual(firstResolution.source, .fallback)
+        XCTAssertEqual(secondResolution.path, "/tmp/from-shell")
+        XCTAssertEqual(secondResolution.source, .shell)
+        XCTAssertEqual(processCallCount, 3)
+    }
+
+    func testClaudeConfigDirectoryResolverCachesVerifiedDefaultFallbackResults() {
+        var processCalls: [[String]] = []
+        ClaudeConfigDirectoryResolver.testHooks = .init(
+            environment: { ["SHELL": "/mock/zsh"] },
+            isExecutableFile: { path in
+                path == "/mock/zsh"
+            },
+            runProcess: { _, arguments, _ in
+                processCalls.append(arguments)
+                return "\n"
+            }
+        )
+
+        let firstResolution = ClaudeConfigDirectoryResolver.resolve()
+        let secondResolution = ClaudeConfigDirectoryResolver.resolve()
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+
+        XCTAssertEqual(firstResolution.path, "\(home)/.claude")
+        XCTAssertEqual(firstResolution.source, .fallback)
+        XCTAssertEqual(secondResolution.path, "\(home)/.claude")
+        XCTAssertEqual(secondResolution.source, .fallback)
+        XCTAssertEqual(processCalls, [["-lc", "printf '%s' \"$CLAUDE_CONFIG_DIR\""], ["-ic", "printf '%s' \"$CLAUDE_CONFIG_DIR\""]])
+    }
+
+    func testClaudeConfigDirectoryResolverFallsBackToInteractiveShell() {
+        var processCalls: [[String]] = []
+        ClaudeConfigDirectoryResolver.testHooks = .init(
+            environment: { ["SHELL": "/mock/zsh"] },
+            isExecutableFile: { path in
+                path == "/mock/zsh"
+            },
+            runProcess: { _, arguments, _ in
+                processCalls.append(arguments)
+                if arguments == ["-ic", "printf '%s' \"$CLAUDE_CONFIG_DIR\""] {
+                    return "~/custom-claude\n"
+                }
+                return nil
+            }
+        )
+
+        let resolution = ClaudeConfigDirectoryResolver.resolve()
+
+        XCTAssertTrue(resolution.path.hasSuffix("/custom-claude"))
+        XCTAssertEqual(resolution.source, .shell)
+        XCTAssertEqual(
+            processCalls,
+            [
+                ["-lc", "printf '%s' \"$CLAUDE_CONFIG_DIR\""],
+                ["-ic", "printf '%s' \"$CLAUDE_CONFIG_DIR\""],
+            ]
+        )
+    }
+
+    func testClaudeConfigDirectoryResolverFallsBackToDefaultDirectory() {
+        ClaudeConfigDirectoryResolver.testHooks = .init(
+            environment: { [:] },
+            isExecutableFile: { _ in false },
+            runProcess: { _, _, _ in nil }
+        )
+
+        let resolution = ClaudeConfigDirectoryResolver.resolve()
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+
+        XCTAssertEqual(resolution.path, "\(home)/.claude")
+        XCTAssertEqual(resolution.source, .fallback)
+    }
+
+    func testResolveUserAgentUsesClaudeBinaryFromResolvedConfigDirectory() {
+        let claudePath = "/tmp/custom-claude/bin/claude"
+        ClaudeConfigDirectoryResolver.testHooks = .init(
+            environment: { ["CLAUDE_CONFIG_DIR": "/tmp/custom-claude"] },
+            isExecutableFile: { _ in false },
+            runProcess: { _, _, _ in nil }
+        )
+
+        var processCalls: [(String, [String])] = []
+        ClaudeCLIResolver.testHooks = .init(
+            environment: { [:] },
+            isExecutableFile: { path in
+                path == claudePath
+            },
+            runProcess: { executablePath, arguments, _ in
+                processCalls.append((executablePath, arguments))
+                return "2.1.92 (Claude Code)\n"
+            }
+        )
+
+        let userAgent = ClaudeCLIResolver.resolveUserAgent()
+
+        XCTAssertEqual(userAgent, "claude-code/2.1.92")
+        XCTAssertEqual(processCalls.count, 1)
+        XCTAssertEqual(processCalls.first?.0, claudePath)
+        XCTAssertEqual(processCalls.first?.1, ["--version"])
     }
 
     func testSuccessfulFetchClearsStaleStateAndSchedulesNormalPolling() async throws {
