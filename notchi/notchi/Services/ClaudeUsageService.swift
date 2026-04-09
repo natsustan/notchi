@@ -232,6 +232,7 @@ enum ClaudeConfigDirectoryResolver {
     private static func resolveViaShell(environment: [String: String]) -> ShellResolution {
         let probeCommand = "printf '%s' \"$CLAUDE_CONFIG_DIR\""
         var sawSuccessfulProbe = false
+        var sawFailedProbe = false
 
         for shellPath in shellCandidates(from: environment) {
             guard testHooks.isExecutableFile(shellPath) else { continue }
@@ -242,7 +243,7 @@ enum ClaudeConfigDirectoryResolver {
             case .unset:
                 sawSuccessfulProbe = true
             case .failed:
-                break
+                sawFailedProbe = true
             }
 
             switch runShellProbe(executablePath: shellPath, arguments: ["-ic", probeCommand]) {
@@ -251,8 +252,12 @@ enum ClaudeConfigDirectoryResolver {
             case .unset:
                 sawSuccessfulProbe = true
             case .failed:
-                break
+                sawFailedProbe = true
             }
+        }
+
+        if sawFailedProbe {
+            return .probeFailed
         }
 
         return sawSuccessfulProbe ? .unset : .probeFailed

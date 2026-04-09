@@ -192,6 +192,52 @@ final class ClaudeUsageServiceTests: XCTestCase {
         XCTAssertEqual(processCallCount, 3)
     }
 
+    func testClaudeConfigDirectoryResolverDoesNotCacheFallbackWhenInteractiveProbeFailsAfterUnsetLoginProbe() {
+        var processCalls: [[String]] = []
+        ClaudeConfigDirectoryResolver.testHooks = .init(
+            environment: { ["SHELL": "/mock/zsh"] },
+            isExecutableFile: { path in
+                path == "/mock/zsh"
+            },
+            runProcess: { _, arguments, _ in
+                processCalls.append(arguments)
+
+                switch processCalls.count {
+                case 1:
+                    XCTAssertEqual(arguments, ["-lc", "printf '%s' \"$CLAUDE_CONFIG_DIR\""])
+                    return "\n"
+                case 2:
+                    XCTAssertEqual(arguments, ["-ic", "printf '%s' \"$CLAUDE_CONFIG_DIR\""])
+                    return nil
+                case 3:
+                    XCTAssertEqual(arguments, ["-lc", "printf '%s' \"$CLAUDE_CONFIG_DIR\""])
+                    return "\n"
+                case 4:
+                    XCTAssertEqual(arguments, ["-ic", "printf '%s' \"$CLAUDE_CONFIG_DIR\""])
+                    return "/tmp/from-interactive-shell\n"
+                default:
+                    return nil
+                }
+            }
+        )
+
+        let firstResolution = ClaudeConfigDirectoryResolver.resolve()
+        let secondResolution = ClaudeConfigDirectoryResolver.resolve()
+
+        XCTAssertEqual(firstResolution.source, .fallback)
+        XCTAssertEqual(secondResolution.path, "/tmp/from-interactive-shell")
+        XCTAssertEqual(secondResolution.source, .shell)
+        XCTAssertEqual(
+            processCalls,
+            [
+                ["-lc", "printf '%s' \"$CLAUDE_CONFIG_DIR\""],
+                ["-ic", "printf '%s' \"$CLAUDE_CONFIG_DIR\""],
+                ["-lc", "printf '%s' \"$CLAUDE_CONFIG_DIR\""],
+                ["-ic", "printf '%s' \"$CLAUDE_CONFIG_DIR\""],
+            ]
+        )
+    }
+
     func testClaudeConfigDirectoryResolverCachesVerifiedDefaultFallbackResults() {
         var processCalls: [[String]] = []
         ClaudeConfigDirectoryResolver.testHooks = .init(
