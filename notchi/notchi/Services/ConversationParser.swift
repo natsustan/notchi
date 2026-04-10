@@ -34,15 +34,7 @@ actor ConversationParser {
             return trimmedPath
         }
 
-        return sessionFilePath(sessionId: sessionId, cwd: cwd)
-    }
-
-    /// Parse only NEW assistant text messages since last call
-    func parseIncremental(sessionId: String, cwd: String) -> ParseResult {
-        parseIncremental(
-            sessionId: sessionId,
-            transcriptPath: Self.sessionFilePath(sessionId: sessionId, cwd: cwd)
-        )
+        return derivedTranscriptPath(sessionId: sessionId, cwd: cwd)
     }
 
     /// Parse only NEW assistant text messages since last call
@@ -180,15 +172,6 @@ actor ConversationParser {
 
     /// Mark current file position as "already processed"
     /// Call this when a new prompt is submitted to ignore previous content
-    func markCurrentPosition(sessionId: String, cwd: String) {
-        markCurrentPosition(
-            sessionId: sessionId,
-            transcriptPath: Self.sessionFilePath(sessionId: sessionId, cwd: cwd)
-        )
-    }
-
-    /// Mark current file position as "already processed"
-    /// Call this when a new prompt is submitted to ignore previous content
     func markCurrentPosition(sessionId: String, transcriptPath: String) {
         guard let fileHandle = FileHandle(forReadingAtPath: transcriptPath) else {
             lastFileOffset[sessionId] = 0
@@ -202,7 +185,7 @@ actor ConversationParser {
         seenMessageIds[sessionId] = []
     }
 
-    static func sessionFilePath(sessionId: String, cwd: String) -> String {
+    private static func derivedTranscriptPath(sessionId: String, cwd: String) -> String {
         let projectDir = cwd.replacingOccurrences(of: "/", with: "-").replacingOccurrences(of: ".", with: "-")
         return "\(projectsRootPath)/\(projectDir)/\(sessionId).jsonl"
     }

@@ -26,7 +26,11 @@ final class ConversationParserTests: XCTestCase {
         let cwd = "/tmp/notchi"
         let parser = ConversationParser.shared
 
-        let sessionFilePath = ConversationParser.sessionFilePath(sessionId: sessionId, cwd: cwd)
+        let sessionFilePath = ConversationParser.resolvedTranscriptPath(
+            sessionId: sessionId,
+            cwd: cwd,
+            transcriptPath: nil
+        )
         let sessionDirectory = URL(fileURLWithPath: sessionFilePath).deletingLastPathComponent()
         try FileManager.default.createDirectory(at: sessionDirectory, withIntermediateDirectories: true)
 
@@ -42,7 +46,7 @@ final class ConversationParserTests: XCTestCase {
         )
         try (synthetic + "\n" + real + "\n").write(toFile: sessionFilePath, atomically: true, encoding: .utf8)
 
-        let result = await parser.parseIncremental(sessionId: sessionId, cwd: cwd)
+        let result = await parser.parseIncremental(sessionId: sessionId, transcriptPath: sessionFilePath)
 
         XCTAssertFalse(result.interrupted)
         XCTAssertEqual(result.messages.map(\.text), ["What's up?"])
@@ -73,7 +77,7 @@ final class ConversationParserTests: XCTestCase {
     }
 
     @MainActor
-    func testSessionFilePathUsesConfiguredClaudeConfigDirectory() {
+    func testResolvedTranscriptPathUsesConfiguredClaudeConfigDirectoryFallback() {
         let resolution = ClaudeConfigDirectoryResolution(
             path: "/tmp/custom-claude-config",
             source: .environment,
@@ -81,9 +85,10 @@ final class ConversationParserTests: XCTestCase {
         )
         ConversationParser.configureProjectsRootPath(using: resolution)
 
-        let path = ConversationParser.sessionFilePath(
+        let path = ConversationParser.resolvedTranscriptPath(
             sessionId: "session-123",
-            cwd: "/Users/ruban/Developer/GitHub/notchi"
+            cwd: "/Users/ruban/Developer/GitHub/notchi",
+            transcriptPath: nil
         )
 
         XCTAssertEqual(
