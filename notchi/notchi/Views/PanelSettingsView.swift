@@ -4,22 +4,14 @@ import SwiftUI
 struct PanelSettingsView: View {
     @AppStorage(AppSettings.hideSpriteWhenIdleKey) private var hideSpriteWhenIdle = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
-    @State private var hooksInstalled = HookInstaller.isInstalled()
-    @State private var hooksError = false
+    @State private var claudeHooksInstalled = IntegrationCoordinator.shared.isInstalled(for: .claude)
+    @State private var claudeHooksError = false
+    @State private var codexHooksInstalled = IntegrationCoordinator.shared.isInstalled(for: .codex)
+    @State private var codexHooksError = false
     @State private var apiKeyInput = AppSettings.anthropicApiKey ?? ""
     @ObservedObject private var updateManager = UpdateManager.shared
     private var usageConnected: Bool { ClaudeUsageService.shared.isConnected }
     private var hasApiKey: Bool { !apiKeyInput.isEmpty }
-
-    private var hookStatusText: String {
-        if hooksError { return "Error" }
-        if hooksInstalled { return "Installed" }
-        return "Not Installed"
-    }
-
-    private var hookStatusColor: Color {
-        hooksInstalled && !hooksError ? TerminalColors.green : TerminalColors.red
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -68,9 +60,22 @@ struct PanelSettingsView: View {
 
     private var aiSection: some View {
         VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
-            Button(action: installHooksIfNeeded) {
-                SettingsRowView(icon: "terminal", title: "Hooks") {
-                    statusBadge(hookStatusText, color: hookStatusColor)
+            Button(action: { installHooksIfNeeded(for: .claude) }) {
+                SettingsRowView(icon: "terminal", title: "Claude Hooks") {
+                    statusBadge(
+                        hookStatusText(installed: claudeHooksInstalled, error: claudeHooksError),
+                        color: hookStatusColor(installed: claudeHooksInstalled, error: claudeHooksError)
+                    )
+                }
+            }
+            .buttonStyle(.plain)
+
+            Button(action: { installHooksIfNeeded(for: .codex) }) {
+                SettingsRowView(icon: "terminal", title: "Codex Hooks") {
+                    statusBadge(
+                        hookStatusText(installed: codexHooksInstalled, error: codexHooksError),
+                        color: hookStatusColor(installed: codexHooksInstalled, error: codexHooksError)
+                    )
                 }
             }
             .buttonStyle(.plain)
@@ -215,14 +220,36 @@ struct PanelSettingsView: View {
         }
     }
 
-    private func installHooksIfNeeded() {
-        guard !hooksInstalled else { return }
-        hooksError = false
-        let success = HookInstaller.installIfNeeded()
-        if success {
-            hooksInstalled = HookInstaller.isInstalled()
-        } else {
-            hooksError = true
+    private func hookStatusText(installed: Bool, error: Bool) -> String {
+        if error { return "Error" }
+        if installed { return "Installed" }
+        return "Not Installed"
+    }
+
+    private func hookStatusColor(installed: Bool, error: Bool) -> Color {
+        installed && !error ? TerminalColors.green : TerminalColors.red
+    }
+
+    private func installHooksIfNeeded(for provider: AgentProvider) {
+        switch provider {
+        case .claude:
+            guard !claudeHooksInstalled else { return }
+            claudeHooksError = false
+        case .codex:
+            guard !codexHooksInstalled else { return }
+            codexHooksError = false
+        }
+
+        let success = IntegrationCoordinator.shared.installHooksIfNeeded(for: provider)
+        let installed = IntegrationCoordinator.shared.isInstalled(for: provider)
+
+        switch provider {
+        case .claude:
+            claudeHooksInstalled = installed
+            claudeHooksError = !success || !installed
+        case .codex:
+            codexHooksInstalled = installed
+            codexHooksError = !success || !installed
         }
     }
 

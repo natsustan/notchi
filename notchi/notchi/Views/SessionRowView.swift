@@ -17,10 +17,15 @@ struct SessionRowView: View {
                     .frame(width: 5, height: 5)
 
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(title)
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(TerminalColors.primaryText)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(title)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(TerminalColors.primaryText)
+                            .lineLimit(1)
+                            .layoutPriority(1)
+
+                        ProviderBadgeView(provider: session.provider)
+                    }
 
                     if let preview = session.activityPreview {
                         Text(preview)
@@ -68,6 +73,6 @@ struct SessionRowView: View {
     }
 
     private var providerAccentColor: Color {
-        TerminalColors.claudeOrange
+        session.provider.accentColor
     }
 }

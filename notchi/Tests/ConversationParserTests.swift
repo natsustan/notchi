@@ -10,11 +10,11 @@ final class ConversationParserTests: XCTestCase {
         tempDirectoryURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("notchi-conversation-parser-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: tempDirectoryURL, withIntermediateDirectories: true)
-        ConversationParser.projectsRootPath = tempDirectoryURL.path
+        ConversationParser.claudeProjectsRootPath = tempDirectoryURL.path
     }
 
     override func tearDown() async throws {
-        ConversationParser.projectsRootPath = ConversationParser.defaultProjectsRootPath
+        ConversationParser.claudeProjectsRootPath = ConversationParser.defaultClaudeProjectsRootPath
         ClaudeConfigDirectoryResolver.resetTestingHooks()
         try? FileManager.default.removeItem(at: tempDirectoryURL)
         tempDirectoryURL = nil
@@ -83,7 +83,7 @@ final class ConversationParserTests: XCTestCase {
             source: .environment,
             shouldCache: true
         )
-        ConversationParser.configureProjectsRootPath(using: resolution)
+        ConversationParser.configureClaudeProjectsRootPath(using: resolution)
 
         let path = ConversationParser.resolvedTranscriptPath(
             sessionId: "session-123",
@@ -98,7 +98,7 @@ final class ConversationParserTests: XCTestCase {
     }
 
     func testResolvedTranscriptPathFallsBackToDerivedSessionPathWhenMissingOrEmpty() {
-        ConversationParser.projectsRootPath = "/tmp/config-projects"
+        ConversationParser.claudeProjectsRootPath = "/tmp/config-projects"
 
         let missing = ConversationParser.resolvedTranscriptPath(
             sessionId: "session-123",
@@ -113,6 +113,36 @@ final class ConversationParserTests: XCTestCase {
 
         XCTAssertEqual(missing, "/tmp/config-projects/-Users-ruban-Developer-GitHub-notchi/session-123.jsonl")
         XCTAssertEqual(empty, "/tmp/config-projects/-Users-ruban-Developer-GitHub-notchi/session-123.jsonl")
+    }
+
+    func testParseIncrementalReadsCodexAssistantMessagesFromExplicitTranscriptPath() async throws {
+        let sessionKey = ProviderSessionKey(provider: .codex, rawSessionId: "codex-\(UUID().uuidString)")
+        let transcriptPath = tempDirectoryURL
+            .appendingPathComponent("\(UUID().uuidString)-codex.jsonl")
+            .path
+        let parser = ConversationParser.shared
+
+        let line = """
+        {"timestamp":"2026-04-11T04:00:00.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello from Codex"}],"phase":"commentary"}}
+        """
+        FileManager.default.createFile(atPath: transcriptPath, contents: Data((line + "\n").utf8))
+
+        let result = await parser.parseIncremental(sessionKey: sessionKey, transcriptPath: transcriptPath)
+        await parser.resetState(for: sessionKey)
+
+        XCTAssertEqual(result.messages.map(\.text), ["Hello from Codex"])
+        XCTAssertFalse(result.interrupted)
+    }
+
+    func testResolvedTranscriptPathReturnsNilForCodexWithoutTranscriptPath() {
+        let path = ConversationParser.resolvedTranscriptPath(
+            for: .codex,
+            sessionId: "codex-session",
+            cwd: "/Users/ruban/Developer/GitHub/notchi",
+            transcriptPath: nil
+        )
+
+        XCTAssertNil(path)
     }
 
     private func assistantLine(uuid: String, text: String, model: String) -> String {

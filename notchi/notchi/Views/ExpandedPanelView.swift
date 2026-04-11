@@ -282,18 +282,20 @@ struct ExpandedPanelView: View {
 
     @ViewBuilder
     private var sharedUsageBar: some View {
-        UsageBarView(
-            usage: usageService.currentUsage,
-            isUsingExtraUsage: usageService.isUsingExtraUsage,
-            isLoading: usageService.isLoading,
-            error: usageService.error,
-            statusMessage: usageService.statusMessage,
-            isStale: usageService.isUsageStale,
-            recoveryAction: usageService.recoveryAction,
-            compact: !shouldShowSessionPicker && isActivityCollapsed,
-            onConnect: { ClaudeUsageService.shared.connectAndStartPolling() },
-            onRetry: { ClaudeUsageService.shared.retryNow() }
-        )
+        if effectiveSession?.provider != .codex {
+            UsageBarView(
+                usage: usageService.currentUsage,
+                isUsingExtraUsage: usageService.isUsingExtraUsage,
+                isLoading: usageService.isLoading,
+                error: usageService.error,
+                statusMessage: usageService.statusMessage,
+                isStale: usageService.isUsageStale,
+                recoveryAction: usageService.recoveryAction,
+                compact: !shouldShowSessionPicker && isActivityCollapsed,
+                onConnect: { ClaudeUsageService.shared.connectAndStartPolling() },
+                onRetry: { ClaudeUsageService.shared.retryNow() }
+            )
+        }
     }
 
     private var activitySection: some View {
@@ -302,11 +304,15 @@ struct ExpandedPanelView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         if let session = effectiveSession {
-                            MorphingText(
-                                text: sessionStore.displaySessionLabel(for: session),
-                                font: .system(size: 11, weight: .medium),
-                                color: TerminalColors.secondaryText
-                            )
+                            HStack(spacing: 6) {
+                                MorphingText(
+                                    text: sessionStore.displaySessionLabel(for: session),
+                                    font: .system(size: 11, weight: .medium),
+                                    color: TerminalColors.secondaryText
+                                )
+
+                                ProviderBadgeView(provider: session.provider)
+                            }
                         }
 
                         Spacer()
@@ -381,11 +387,11 @@ struct ExpandedPanelView: View {
     }
 
     private var emptyState: some View {
-        let hooksInstalled = HookInstaller.isInstalled()
+        let hooksInstalled = IntegrationCoordinator.shared.hasAnyInstalledHooks()
         let title = hooksInstalled ? "Waiting for activity" : "Hooks not installed"
         let subtitle = hooksInstalled
-            ? "Send a message in Claude Code to start tracking"
-            : "Open settings to set up Claude Code integration"
+            ? "Start Claude Code or Codex to begin tracking"
+            : "Open settings to set up Claude Code and Codex integration"
 
         return VStack(spacing: 8) {
             MorphingText(
