@@ -3,13 +3,13 @@ import XCTest
 @testable import notchi
 
 actor EventRecorder {
-    private var events: [HookEvent] = []
+    private var events: [AgentHookEnvelope] = []
 
-    func record(_ event: HookEvent) {
+    func record(_ event: AgentHookEnvelope) {
         events.append(event)
     }
 
-    func snapshot() -> [HookEvent] {
+    func snapshot() -> [AgentHookEnvelope] {
         events
     }
 }
@@ -178,6 +178,22 @@ final class SocketServerTests: XCTestCase {
         XCTAssertTrue(delivered)
     }
 
+    func testPayloadWithoutProviderDefaultsToClaude() async throws {
+        let recorder = EventRecorder()
+        let (_, path) = try await makeServer(clientReadTimeout: 0.5, recorder: recorder)
+
+        let client = try connectClient(to: path)
+        try client.send(makeEventPayload(sessionId: "default-provider"))
+        client.closeConnection()
+
+        let delivered = await waitUntil(timeout: 0.5) {
+            let events = await recorder.snapshot()
+            return events.count == 1 && events.first?.provider == .claude
+        }
+
+        XCTAssertTrue(delivered)
+    }
+
     private func makeServer(
         at path: String? = nil,
         clientReadTimeout: TimeInterval,
@@ -211,7 +227,11 @@ final class SocketServerTests: XCTestCase {
         "/tmp/notchi-tests-\(UUID().uuidString).sock"
     }
 
-    private func makeEventPayload(sessionId: String, transcriptPath: String? = nil) throws -> Data {
+    private func makeEventPayload(
+        sessionId: String,
+        provider: AgentProvider? = nil,
+        transcriptPath: String? = nil
+    ) throws -> Data {
         var payload: [String: Any] = [
             "session_id": sessionId,
             "cwd": "/tmp",
@@ -220,6 +240,9 @@ final class SocketServerTests: XCTestCase {
             "pid": NSNull(),
             "tty": NSNull(),
         ]
+        if let provider {
+            payload["provider"] = provider.rawValue
+        }
         if let transcriptPath {
             payload["transcript_path"] = transcriptPath
         }

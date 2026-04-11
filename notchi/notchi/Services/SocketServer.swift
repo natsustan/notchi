@@ -3,7 +3,7 @@ import os.log
 
 private let logger = Logger(subsystem: "com.ruban.notchi", category: "SocketServer")
 
-typealias HookEventHandler = @Sendable (HookEvent) -> Void
+typealias AgentHookEnvelopeHandler = @Sendable (AgentHookEnvelope) -> Void
 
 final class SocketServer {
     static let socketPath = "/tmp/notchi.sock"
@@ -13,7 +13,7 @@ final class SocketServer {
     private let clientReadTimeout: TimeInterval
     private var serverSocket: Int32 = -1
     private var acceptSource: DispatchSourceRead?
-    private var eventHandler: HookEventHandler?
+    private var eventHandler: AgentHookEnvelopeHandler?
     private let serverQueue = DispatchQueue(label: "com.ruban.notchi.socket.server", qos: .userInitiated)
     private let clientQueue = DispatchQueue(label: "com.ruban.notchi.socket.client", qos: .userInitiated, attributes: .concurrent)
 
@@ -22,13 +22,13 @@ final class SocketServer {
         self.clientReadTimeout = clientReadTimeout
     }
 
-    func start(onEvent: @escaping HookEventHandler) {
+    func start(onEvent: @escaping AgentHookEnvelopeHandler) {
         serverQueue.async { [weak self] in
             self?.startServer(onEvent: onEvent)
         }
     }
 
-    private func startServer(onEvent: @escaping HookEventHandler) {
+    private func startServer(onEvent: @escaping AgentHookEnvelopeHandler) {
         guard serverSocket < 0 else { return }
 
         switch prepareSocketPathForBinding() {
@@ -214,12 +214,12 @@ final class SocketServer {
         }
     }
 
-    private func handleClient(_ clientSocket: Int32, eventHandler: HookEventHandler?) {
+    private func handleClient(_ clientSocket: Int32, eventHandler: AgentHookEnvelopeHandler?) {
         defer { close(clientSocket) }
 
         guard let allData = readClientPayload(from: clientSocket), !allData.isEmpty else { return }
 
-        guard let event = try? JSONDecoder().decode(HookEvent.self, from: allData) else {
+        guard let event = try? JSONDecoder().decode(AgentHookEnvelope.self, from: allData) else {
             logger.warning("Failed to parse event")
             return
         }
@@ -303,21 +303,21 @@ final class SocketServer {
         return Int32(min(milliseconds, Int(Int32.max)))
     }
 
-    private func logEvent(_ event: HookEvent) {
+    private func logEvent(_ event: AgentHookEnvelope) {
         switch event.event {
         case "SessionStart":
-            logger.info("Session started")
+            logger.info("\(event.provider.rawValue, privacy: .public) session started")
         case "SessionEnd":
-            logger.info("Session ended")
+            logger.info("\(event.provider.rawValue, privacy: .public) session ended")
         case "PreToolUse":
             let tool = event.tool ?? "unknown"
-            logger.info("Tool: \(tool, privacy: .public)")
+            logger.info("\(event.provider.rawValue, privacy: .public) tool: \(tool, privacy: .public)")
         case "PostToolUse":
             let tool = event.tool ?? "unknown"
             let success = event.status != "error"
-            logger.info("Result: \(success ? "✓" : "✗", privacy: .public) \(tool, privacy: .public)")
+            logger.info("\(event.provider.rawValue, privacy: .public) result: \(success ? "✓" : "✗", privacy: .public) \(tool, privacy: .public)")
         case "Stop", "SubagentStop":
-            logger.info("Done")
+            logger.info("\(event.provider.rawValue, privacy: .public) done")
         default:
             break
         }
