@@ -1,7 +1,7 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "ClaudeUsageService")
+nonisolated private let logger = Logger(subsystem: "com.ruban.notchi", category: "ClaudeUsageService")
 
 enum ClaudeUsageRecoveryAction: Equatable {
     case none
@@ -77,7 +77,7 @@ private struct AnthropicErrorDetail: Decodable {
     let message: String?
 }
 
-private func runProcessWithTimeout(
+nonisolated private func runProcessWithTimeout(
     executablePath: String,
     arguments: [String],
     environment: [String: String]? = nil,
@@ -113,7 +113,7 @@ private func runProcessWithTimeout(
     return output
 }
 
-private func extractAbsolutePath(from output: String) -> String? {
+nonisolated private func extractAbsolutePath(from output: String) -> String? {
     output
         .split(separator: "\n")
         .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -126,36 +126,36 @@ enum ClaudeConfigDirectorySource: String {
     case fallback = "default"
 }
 
-struct ClaudeConfigDirectoryResolution {
+struct ClaudeConfigDirectoryResolution: Sendable {
     let path: String
     let source: ClaudeConfigDirectorySource
     let shouldCache: Bool
 
-    var directoryURL: URL {
+    nonisolated var directoryURL: URL {
         URL(fileURLWithPath: path, isDirectory: true)
     }
 
-    var settingsURL: URL {
+    nonisolated var settingsURL: URL {
         directoryURL.appendingPathComponent("settings.json")
     }
 
-    var hooksDirectoryURL: URL {
+    nonisolated var hooksDirectoryURL: URL {
         directoryURL.appendingPathComponent("hooks", isDirectory: true)
     }
 
-    var hookScriptURL: URL {
+    nonisolated var hookScriptURL: URL {
         hooksDirectoryURL.appendingPathComponent("notchi-hook.sh")
     }
 
-    var projectsDirectoryURL: URL {
+    nonisolated var projectsDirectoryURL: URL {
         directoryURL.appendingPathComponent("projects", isDirectory: true)
     }
 
-    var claudeBinaryPath: String {
+    nonisolated var claudeBinaryPath: String {
         directoryURL.appendingPathComponent("bin/claude").path
     }
 
-    var displayPath: String {
+    nonisolated var displayPath: String {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         guard path.hasPrefix(home) else { return path }
         return "~" + String(path.dropFirst(home.count))
@@ -163,32 +163,45 @@ struct ClaudeConfigDirectoryResolution {
 }
 
 enum ClaudeConfigDirectoryResolver {
-    struct TestHooks {
-        var environment: () -> [String: String]
-        var isExecutableFile: (String) -> Bool
-        var runProcess: (
+    struct TestHooks: Sendable {
+        nonisolated let environment: @Sendable () -> [String: String]
+        nonisolated let isExecutableFile: @Sendable (String) -> Bool
+        nonisolated let runProcess: @Sendable (
             _ executablePath: String,
             _ arguments: [String],
             _ environment: [String: String]?
         ) -> String?
     }
 
-    private static let commandTimeout: TimeInterval = 2
-    private static var cachedResolution: ClaudeConfigDirectoryResolution?
-    static var testHooks = makeDefaultTestHooks()
+    nonisolated private static let commandTimeout: TimeInterval = 2
+    nonisolated private static let stateQueue = DispatchQueue(
+        label: "com.ruban.notchi.claudeConfigResolver.state"
+    )
+    nonisolated(unsafe) private static var state = State()
 
-    static func resolve() -> ClaudeConfigDirectoryResolution {
-        if let cachedResolution {
+    nonisolated static var testHooks: TestHooks {
+        get {
+            stateQueue.sync { state.testHooks }
+        }
+        set {
+            stateQueue.sync { state.testHooks = newValue }
+        }
+    }
+
+    nonisolated static func resolve() -> ClaudeConfigDirectoryResolution {
+        let snapshot = currentState()
+        if let cachedResolution = snapshot.cachedResolution {
             return cachedResolution
         }
 
-        let environment = testHooks.environment()
+        let hooks = snapshot.testHooks
+        let environment = hooks.environment()
         let resolved: ClaudeConfigDirectoryResolution
 
         if let path = normalize(path: environment["CLAUDE_CONFIG_DIR"]) {
             resolved = ClaudeConfigDirectoryResolution(path: path, source: .environment, shouldCache: true)
         } else {
-            switch resolveViaShell(environment: environment) {
+            switch resolveViaShell(environment: environment, testHooks: hooks) {
             case .resolved(let path):
                 resolved = ClaudeConfigDirectoryResolution(path: path, source: .shell, shouldCache: true)
             case .unset:
@@ -205,17 +218,19 @@ enum ClaudeConfigDirectoryResolver {
         }
 
         if resolved.shouldCache {
-            cachedResolution = resolved
+            updateState { $0.cachedResolution = resolved }
         }
         return resolved
     }
 
-    static func resetTestingHooks() {
-        testHooks = makeDefaultTestHooks()
-        cachedResolution = nil
+    nonisolated static func resetTestingHooks() {
+        updateState {
+            $0.testHooks = makeDefaultTestHooks()
+            $0.cachedResolution = nil
+        }
     }
 
-    private static func makeDefaultTestHooks() -> TestHooks {
+    nonisolated private static func makeDefaultTestHooks() -> TestHooks {
         TestHooks(
             environment: { ProcessInfo.processInfo.environment },
             isExecutableFile: { path in
@@ -232,19 +247,37 @@ enum ClaudeConfigDirectoryResolver {
         )
     }
 
-    private enum ShellResolution {
+    nonisolated private enum ShellResolution {
         case resolved(String)
         case unset
         case probeFailed
     }
 
-    private enum ShellProbeResult {
+    nonisolated private enum ShellProbeResult {
         case resolved(String)
         case unset
         case failed
     }
 
-    private static func resolveViaShell(environment: [String: String]) -> ShellResolution {
+    nonisolated private struct State {
+        var cachedResolution: ClaudeConfigDirectoryResolution?
+        var testHooks = makeDefaultTestHooks()
+    }
+
+    nonisolated private static func currentState() -> State {
+        stateQueue.sync { state }
+    }
+
+    nonisolated private static func updateState(_ body: (inout State) -> Void) {
+        stateQueue.sync {
+            body(&state)
+        }
+    }
+
+    nonisolated private static func resolveViaShell(
+        environment: [String: String],
+        testHooks: TestHooks
+    ) -> ShellResolution {
         let probeCommand = "printf '%s' \"$CLAUDE_CONFIG_DIR\""
         var sawSuccessfulProbe = false
         var sawFailedProbe = false
@@ -252,7 +285,11 @@ enum ClaudeConfigDirectoryResolver {
         for shellPath in shellCandidates(from: environment) {
             guard testHooks.isExecutableFile(shellPath) else { continue }
 
-            switch runShellProbe(executablePath: shellPath, arguments: ["-lc", probeCommand]) {
+            switch runShellProbe(
+                executablePath: shellPath,
+                arguments: ["-lc", probeCommand],
+                testHooks: testHooks
+            ) {
             case .resolved(let path):
                 return .resolved(path)
             case .unset:
@@ -261,7 +298,11 @@ enum ClaudeConfigDirectoryResolver {
                 sawFailedProbe = true
             }
 
-            switch runShellProbe(executablePath: shellPath, arguments: ["-ic", probeCommand]) {
+            switch runShellProbe(
+                executablePath: shellPath,
+                arguments: ["-ic", probeCommand],
+                testHooks: testHooks
+            ) {
             case .resolved(let path):
                 return .resolved(path)
             case .unset:
@@ -278,7 +319,11 @@ enum ClaudeConfigDirectoryResolver {
         return sawSuccessfulProbe ? .unset : .probeFailed
     }
 
-    private static func runShellProbe(executablePath: String, arguments: [String]) -> ShellProbeResult {
+    nonisolated private static func runShellProbe(
+        executablePath: String,
+        arguments: [String],
+        testHooks: TestHooks
+    ) -> ShellProbeResult {
         guard let output = testHooks.runProcess(executablePath, arguments, nil) else {
             return .failed
         }
@@ -290,7 +335,7 @@ enum ClaudeConfigDirectoryResolver {
         return .resolved(path)
     }
 
-    private static func normalize(path rawPath: String?) -> String? {
+    nonisolated private static func normalize(path rawPath: String?) -> String? {
         guard let rawPath else { return nil }
         let trimmed = rawPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
@@ -303,7 +348,7 @@ enum ClaudeConfigDirectoryResolver {
             .path
     }
 
-    private static func shellCandidates(from environment: [String: String]) -> [String] {
+    nonisolated private static func shellCandidates(from environment: [String: String]) -> [String] {
         var seenShells: Set<String> = []
         return [environment["SHELL"], "/bin/zsh", "/bin/bash"]
             .compactMap { $0 }
@@ -312,17 +357,17 @@ enum ClaudeConfigDirectoryResolver {
 }
 
 enum ClaudeCLIResolver {
-    struct TestHooks {
-        var environment: () -> [String: String]
-        var isExecutableFile: (String) -> Bool
-        var runProcess: (
+    struct TestHooks: Sendable {
+        let environment: @Sendable () -> [String: String]
+        let isExecutableFile: @Sendable (String) -> Bool
+        let runProcess: @Sendable (
             _ executablePath: String,
             _ arguments: [String],
             _ environment: [String: String]?
         ) -> String?
     }
 
-    private static let commandTimeout: TimeInterval = 2
+    nonisolated private static let commandTimeout: TimeInterval = 2
     static var testHooks = makeDefaultTestHooks()
 
     static func resolveUserAgent() -> String? {

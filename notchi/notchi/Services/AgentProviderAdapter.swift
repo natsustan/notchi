@@ -1,12 +1,15 @@
 import Foundation
 
-protocol AgentProviderAdapter {
-    var provider: AgentProvider { get }
+nonisolated protocol AgentProviderAdapter: Sendable {
+    nonisolated var provider: AgentProvider { get }
 
     @discardableResult
-    func installIfNeeded() -> Bool
+    nonisolated func installIfNeeded() -> Bool
 
-    func isInstalled() -> Bool
-    func configureForLaunch()
-    func normalize(_ envelope: AgentHookEnvelope) -> HookEvent?
+    /// Returns whether the provider runtime itself is available on this machine,
+    /// regardless of whether Notchi has installed hooks for it yet.
+    nonisolated func isProviderAvailable() -> Bool
+    nonisolated func isInstalled() -> Bool
+    nonisolated func configureForLaunch()
+    nonisolated func normalize(_ envelope: AgentHookEnvelope) -> HookEvent?
 }

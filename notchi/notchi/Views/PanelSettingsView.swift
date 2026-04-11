@@ -1,6 +1,37 @@
 import ServiceManagement
 import SwiftUI
 
+private enum HookInstallBadgeState {
+    case installed
+    case notInstalled
+    case providerMissing
+    case error
+
+    func text(for provider: AgentProvider) -> String {
+        switch self {
+        case .installed:
+            "Installed"
+        case .notInstalled:
+            "Not Installed"
+        case .providerMissing:
+            "\(provider.badgeText) Missing"
+        case .error:
+            "Error"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .installed:
+            TerminalColors.green
+        case .providerMissing:
+            TerminalColors.amber
+        case .notInstalled, .error:
+            TerminalColors.red
+        }
+    }
+}
+
 struct PanelSettingsView: View {
     @AppStorage(AppSettings.hideSpriteWhenIdleKey) private var hideSpriteWhenIdle = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
@@ -63,8 +94,8 @@ struct PanelSettingsView: View {
             Button(action: { installHooksIfNeeded(for: .claude) }) {
                 SettingsRowView(icon: "terminal", title: "Claude Hooks") {
                     statusBadge(
-                        hookStatusText(installed: claudeHooksInstalled, error: claudeHooksError),
-                        color: hookStatusColor(installed: claudeHooksInstalled, error: claudeHooksError)
+                        hookStatusText(for: .claude, installed: claudeHooksInstalled, error: claudeHooksError),
+                        color: hookStatusColor(for: .claude, installed: claudeHooksInstalled, error: claudeHooksError)
                     )
                 }
             }
@@ -73,8 +104,8 @@ struct PanelSettingsView: View {
             Button(action: { installHooksIfNeeded(for: .codex) }) {
                 SettingsRowView(icon: "terminal", title: "Codex Hooks") {
                     statusBadge(
-                        hookStatusText(installed: codexHooksInstalled, error: codexHooksError),
-                        color: hookStatusColor(installed: codexHooksInstalled, error: codexHooksError)
+                        hookStatusText(for: .codex, installed: codexHooksInstalled, error: codexHooksError),
+                        color: hookStatusColor(for: .codex, installed: codexHooksInstalled, error: codexHooksError)
                     )
                 }
             }
@@ -220,14 +251,21 @@ struct PanelSettingsView: View {
         }
     }
 
-    private func hookStatusText(installed: Bool, error: Bool) -> String {
-        if error { return "Error" }
-        if installed { return "Installed" }
-        return "Not Installed"
+    private func hookStatusText(for provider: AgentProvider, installed: Bool, error: Bool) -> String {
+        hookStatus(for: provider, installed: installed, error: error).text(for: provider)
     }
 
-    private func hookStatusColor(installed: Bool, error: Bool) -> Color {
-        installed && !error ? TerminalColors.green : TerminalColors.red
+    private func hookStatusColor(for provider: AgentProvider, installed: Bool, error: Bool) -> Color {
+        hookStatus(for: provider, installed: installed, error: error).color
+    }
+
+    private func hookStatus(for provider: AgentProvider, installed: Bool, error: Bool) -> HookInstallBadgeState {
+        guard IntegrationCoordinator.shared.isProviderAvailable(for: provider) else {
+            return .providerMissing
+        }
+        if error { return .error }
+        if installed { return .installed }
+        return .notInstalled
     }
 
     private func installHooksIfNeeded(for provider: AgentProvider) {
@@ -238,6 +276,18 @@ struct PanelSettingsView: View {
         case .codex:
             guard !codexHooksInstalled else { return }
             codexHooksError = false
+        }
+
+        guard IntegrationCoordinator.shared.isProviderAvailable(for: provider) else {
+            switch provider {
+            case .claude:
+                claudeHooksInstalled = false
+                claudeHooksError = false
+            case .codex:
+                codexHooksInstalled = false
+                codexHooksError = false
+            }
+            return
         }
 
         let success = IntegrationCoordinator.shared.installHooksIfNeeded(for: provider)

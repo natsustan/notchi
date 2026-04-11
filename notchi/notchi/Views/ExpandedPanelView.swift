@@ -139,6 +139,13 @@ struct ExpandedPanelView: View {
         sessionStore.activeSessionCount >= 2 && !showingSessionActivity
     }
 
+    private var shouldShowSharedUsageBar: Bool {
+        Self.shouldShowSharedUsageBar(
+            effectiveSession: effectiveSession,
+            activeSessions: sessionStore.sortedSessions
+        )
+    }
+
     private var primaryContentTransition: AnyTransition {
         .asymmetric(
             insertion: .modifier(
@@ -230,11 +237,11 @@ struct ExpandedPanelView: View {
                         },
                         selectedSessionId: sessionStore.selectedSessionId,
                         onSelectSession: { sessionId in
-                            sessionStore.selectSession(sessionId)
+                            sessionStore.selectSession(matchingStableId: sessionId)
                             showingSessionActivity = true
                         },
                         onDeleteSession: { sessionId in
-                            sessionStore.dismissSession(sessionId)
+                            sessionStore.dismissSession(matchingStableId: sessionId)
                         }
                     )
                 }
@@ -282,7 +289,7 @@ struct ExpandedPanelView: View {
 
     @ViewBuilder
     private var sharedUsageBar: some View {
-        if effectiveSession?.provider != .codex {
+        if shouldShowSharedUsageBar {
             UsageBarView(
                 usage: usageService.currentUsage,
                 isUsingExtraUsage: usageService.isUsingExtraUsage,
@@ -296,6 +303,14 @@ struct ExpandedPanelView: View {
                 onRetry: { ClaudeUsageService.shared.retryNow() }
             )
         }
+    }
+
+    static func shouldShowSharedUsageBar(effectiveSession: SessionData?, activeSessions: [SessionData]) -> Bool {
+        guard let effectiveSession else { return true }
+        if effectiveSession.provider == .claude {
+            return true
+        }
+        return activeSessions.contains { $0.provider == .claude }
     }
 
     private var activitySection: some View {

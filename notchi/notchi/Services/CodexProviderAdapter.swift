@@ -1,20 +1,25 @@
 import Foundation
 
 struct CodexProviderAdapter: AgentProviderAdapter {
-    let provider: AgentProvider = .codex
+    nonisolated let provider: AgentProvider = .codex
+    nonisolated init() {}
 
     @discardableResult
-    func installIfNeeded() -> Bool {
+    nonisolated func installIfNeeded() -> Bool {
         CodexHookInstaller.installIfNeeded()
     }
 
-    func isInstalled() -> Bool {
+    nonisolated func isProviderAvailable() -> Bool {
+        CodexHookInstaller.codexDirectoryExists()
+    }
+
+    nonisolated func isInstalled() -> Bool {
         CodexHookInstaller.isInstalled()
     }
 
-    func configureForLaunch() {}
+    nonisolated func configureForLaunch() {}
 
-    func normalize(_ envelope: AgentHookEnvelope) -> HookEvent? {
+    nonisolated func normalize(_ envelope: AgentHookEnvelope) -> HookEvent? {
         guard let event = NormalizedAgentEvent.codexEvent(named: envelope.event) else {
             return nil
         }

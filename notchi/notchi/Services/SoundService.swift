@@ -10,11 +10,11 @@ final class SoundService {
 
     private static let cooldown: TimeInterval = 2.0
     @ObservationIgnored
-    private var lastSoundTimes: [String: Date] = [:]
+    private var lastSoundTimes: [ProviderSessionKey: Date] = [:]
 
     private init() {}
 
-    func playNotificationSound(sessionId: String, isInteractive: Bool) {
+    func playNotificationSound(sessionKey: ProviderSessionKey, isInteractive: Bool) {
         guard isInteractive else {
             logger.debug("Non-interactive session, skipping sound")
             return
@@ -32,18 +32,18 @@ final class SoundService {
         }
 
         let now = Date()
-        if let lastPlayed = lastSoundTimes[sessionId],
+        if let lastPlayed = lastSoundTimes[sessionKey],
            now.timeIntervalSince(lastPlayed) < Self.cooldown {
-            logger.debug("Sound cooldown active for session \(sessionId, privacy: .public)")
+            logger.debug("Sound cooldown active for session \(sessionKey.stableId, privacy: .public)")
             return
         }
 
-        lastSoundTimes[sessionId] = now
+        lastSoundTimes[sessionKey] = now
         playSound(named: soundName)
     }
 
-    func clearCooldown(for sessionId: String) {
-        lastSoundTimes.removeValue(forKey: sessionId)
+    func clearCooldown(for sessionKey: ProviderSessionKey) {
+        lastSoundTimes.removeValue(forKey: sessionKey)
     }
 
     func previewSound(_ sound: NotificationSound) {

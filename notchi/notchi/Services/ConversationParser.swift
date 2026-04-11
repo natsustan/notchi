@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 struct ParseResult {
@@ -7,20 +8,19 @@ struct ParseResult {
 
 actor ConversationParser {
     static let shared = ConversationParser()
-    static let defaultClaudeProjectsRootPath = "\(NSHomeDirectory())/.claude/projects"
-    static var claudeProjectsRootPath = defaultClaudeProjectsRootPath
+    nonisolated static let defaultClaudeProjectsRootPath = "\(NSHomeDirectory())/.claude/projects"
+    nonisolated(unsafe) static var claudeProjectsRootPath = defaultClaudeProjectsRootPath
 
     private var lastFileOffset: [String: UInt64] = [:]
     private var seenMessageIds: [String: Set<String>] = [:]
 
     private static let emptyResult = ParseResult(messages: [], interrupted: false)
 
-    @MainActor
-    static func configureClaudeProjectsRootPath(using claudeConfig: ClaudeConfigDirectoryResolution) {
+    nonisolated static func configureClaudeProjectsRootPath(using claudeConfig: ClaudeConfigDirectoryResolution) {
         claudeProjectsRootPath = claudeConfig.projectsDirectoryURL.path
     }
 
-    static func resolvedTranscriptPath(
+    nonisolated static func resolvedTranscriptPath(
         for provider: AgentProvider,
         sessionId: String,
         cwd: String,
@@ -38,7 +38,7 @@ actor ConversationParser {
         return derivedClaudeTranscriptPath(sessionId: sessionId, cwd: cwd)
     }
 
-    static func resolvedTranscriptPath(sessionId: String, cwd: String, transcriptPath: String?) -> String {
+    nonisolated static func resolvedTranscriptPath(sessionId: String, cwd: String, transcriptPath: String?) -> String {
         resolvedTranscriptPath(for: .claude, sessionId: sessionId, cwd: cwd, transcriptPath: transcriptPath)
             ?? derivedClaudeTranscriptPath(sessionId: sessionId, cwd: cwd)
     }
@@ -216,7 +216,7 @@ actor ConversationParser {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !fullText.isEmpty else { return nil }
 
-        let identifier = "\(phase)-\(timestampString ?? "unknown")-\(line.hashValue)"
+        let identifier = "\(phase)-\(timestampString ?? "unknown")-\(stableContentDigest(for: line))"
         return AssistantMessage(id: identifier, text: fullText, timestamp: timestamp)
     }
 
@@ -249,6 +249,13 @@ actor ConversationParser {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         return formatter.date(from: timestampString) ?? Date()
+    }
+
+    private static func stableContentDigest(for line: String) -> String {
+        // WHY: Swift's hashValue is seeded per process, so dedupe IDs would change
+        // across app restarts; a short SHA256 prefix keeps them deterministic.
+        let digest = SHA256.hash(data: Data(line.utf8))
+        return digest.prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 
     private static func derivedClaudeTranscriptPath(sessionId: String, cwd: String) -> String {

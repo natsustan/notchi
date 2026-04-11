@@ -2,6 +2,18 @@ import XCTest
 @testable import notchi
 
 final class AgentProviderAdapterTests: XCTestCase {
+    private struct TestProviderAdapter: AgentProviderAdapter {
+        nonisolated let provider: AgentProvider
+        nonisolated let available: Bool
+        nonisolated let installed: Bool
+
+        nonisolated func installIfNeeded() -> Bool { installed }
+        nonisolated func isProviderAvailable() -> Bool { available }
+        nonisolated func isInstalled() -> Bool { installed }
+        nonisolated func configureForLaunch() {}
+        nonisolated func normalize(_ envelope: AgentHookEnvelope) -> HookEvent? { nil }
+    }
+
     func testClaudeAdapterNormalizesEnvelopeIntoHookEvent() throws {
         let data = try JSONSerialization.data(withJSONObject: [
             "session_id": "claude-session",
@@ -50,5 +62,30 @@ final class AgentProviderAdapterTests: XCTestCase {
         let envelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: data)
 
         XCTAssertNil(CodexProviderAdapter().normalize(envelope))
+    }
+
+    func testClaudeAdapterDropsUnknownEnvelope() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "session_id": "claude-session",
+            "cwd": "/tmp",
+            "event": "NotARealClaudeEvent",
+            "status": "waiting_for_input",
+        ])
+        let envelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: data)
+
+        XCTAssertNil(ClaudeProviderAdapter().normalize(envelope))
+    }
+
+    func testIntegrationCoordinatorReportsProviderAvailabilityFromAdapters() {
+        let coordinator = IntegrationCoordinator(
+            socketServer: SocketServer(socketPath: "/tmp/notchi-test-\(UUID().uuidString).sock"),
+            adapters: [
+                TestProviderAdapter(provider: .claude, available: false, installed: false),
+                TestProviderAdapter(provider: .codex, available: true, installed: false),
+            ]
+        )
+
+        XCTAssertFalse(coordinator.isProviderAvailable(for: .claude))
+        XCTAssertTrue(coordinator.isProviderAvailable(for: .codex))
     }
 }

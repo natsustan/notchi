@@ -5,8 +5,8 @@ import XCTest
 @MainActor
 final class NotchiStateMachineTests: XCTestCase {
     override func tearDown() async throws {
-        let sessionIds = Array(SessionStore.shared.sessions.keys)
-        sessionIds.forEach { SessionStore.shared.dismissSession($0) }
+        let sessionKeys = Array(SessionStore.shared.sessions.keys)
+        sessionKeys.forEach { SessionStore.shared.dismissSession($0) }
         NotchiStateMachine.shared.resetTestingHooks()
         try await super.tearDown()
     }
@@ -26,7 +26,7 @@ final class NotchiStateMachineTests: XCTestCase {
             XCTAssertEqual(session.task, .working)
             XCTAssertTrue(session.isProcessing)
 
-            SessionStore.shared.dismissSession(session.id)
+            SessionStore.shared.dismissSession(session.sessionKey)
         }
     }
 
@@ -40,7 +40,7 @@ final class NotchiStateMachineTests: XCTestCase {
         XCTAssertFalse(session.isProcessing)
 
         let result = ParseResult(messages: [makeAssistantMessage()], interrupted: false)
-        SessionStore.shared.recordAssistantMessages(result.messages, for: session.id)
+        SessionStore.shared.recordAssistantMessages(result.messages, for: session.sessionKey)
         stateMachine.reconcileFileSyncResult(result, for: session.sessionKey, hasActiveWatcher: false)
 
         XCTAssertEqual(session.task, .idle)

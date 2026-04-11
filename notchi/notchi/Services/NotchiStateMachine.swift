@@ -73,12 +73,12 @@ final class NotchiStateMachine {
 
         case .preToolUse:
             if isDone {
-                SoundService.shared.playNotificationSound(sessionId: event.sessionId, isInteractive: session.isInteractive)
+                SoundService.shared.playNotificationSound(sessionKey: event.sessionKey, isInteractive: session.isInteractive)
             }
 
         case .permissionRequest:
             if event.provider.capabilities.supportsPermissionPrompts {
-                SoundService.shared.playNotificationSound(sessionId: event.sessionId, isInteractive: session.isInteractive)
+                SoundService.shared.playNotificationSound(sessionKey: event.sessionKey, isInteractive: session.isInteractive)
             }
 
         case .postToolUse:
@@ -92,7 +92,7 @@ final class NotchiStateMachine {
             }
 
         case .stop:
-            SoundService.shared.playNotificationSound(sessionId: event.sessionId, isInteractive: session.isInteractive)
+            SoundService.shared.playNotificationSound(sessionKey: event.sessionKey, isInteractive: session.isInteractive)
             stopFileWatcher(sessionKey: event.sessionKey)
             if let transcriptPath {
                 scheduleFileSync(sessionKey: event.sessionKey, transcriptPath: transcriptPath)
@@ -102,7 +102,7 @@ final class NotchiStateMachine {
             stopFileWatcher(sessionKey: event.sessionKey)
             pendingSyncTasks.removeValue(forKey: event.sessionKey)?.cancel()
             pendingPositionMarks.removeValue(forKey: event.sessionKey)?.cancel()
-            SoundService.shared.clearCooldown(for: event.sessionId)
+            SoundService.shared.clearCooldown(for: event.sessionKey)
             Task { await ConversationParser.shared.resetState(for: event.sessionKey) }
             if sessionStore.activeSessionCount == 0 {
                 logger.info("Global state: idle")
@@ -111,7 +111,7 @@ final class NotchiStateMachine {
 
         default:
             if isDone && session.task != .idle {
-                SoundService.shared.playNotificationSound(sessionId: event.sessionId, isInteractive: session.isInteractive)
+                SoundService.shared.playNotificationSound(sessionKey: event.sessionKey, isInteractive: session.isInteractive)
             }
         }
 
@@ -146,7 +146,7 @@ final class NotchiStateMachine {
     }
 
     func reconcileFileSyncResult(_ result: ParseResult, for sessionKey: ProviderSessionKey, hasActiveWatcher: Bool) {
-        guard let session = sessionStore.sessions[sessionKey.stableId] else { return }
+        guard let session = sessionStore.session(for: sessionKey) else { return }
 
         if !result.messages.isEmpty,
            session.isInteractive,

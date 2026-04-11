@@ -1,38 +1,38 @@
 import Foundation
 import os.log
 
-private let codexHookLogger = Logger(subsystem: "com.ruban.notchi", category: "CodexHookInstaller")
+nonisolated private let codexHookLogger = Logger(subsystem: "com.ruban.notchi", category: "CodexHookInstaller")
 
 struct CodexHookInstaller {
-    private static let hookScriptName = "notchi-codex-hook.sh"
-    private static let hookStatusMessage = "Syncing Notchi"
+    nonisolated private static let hookScriptName = "notchi-codex-hook.sh"
+    nonisolated private static let hookStatusMessage = "Syncing Notchi"
 
-    static var codexDirectoryURL: URL {
+    nonisolated static var codexDirectoryURL: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex", isDirectory: true)
     }
 
-    static var hooksJSONURL: URL {
+    nonisolated static var hooksJSONURL: URL {
         codexDirectoryURL.appendingPathComponent("hooks.json")
     }
 
-    static var configURL: URL {
+    nonisolated static var configURL: URL {
         codexDirectoryURL.appendingPathComponent("config.toml")
     }
 
-    static var hooksDirectoryURL: URL {
+    nonisolated static var hooksDirectoryURL: URL {
         codexDirectoryURL.appendingPathComponent("hooks", isDirectory: true)
     }
 
-    static var hookScriptURL: URL {
+    nonisolated static var hookScriptURL: URL {
         hooksDirectoryURL.appendingPathComponent(hookScriptName)
     }
 
-    static var hookCommand: String {
+    nonisolated static var hookCommand: String {
         hookScriptURL.path
     }
 
     @discardableResult
-    static func installIfNeeded() -> Bool {
+    nonisolated static func installIfNeeded() -> Bool {
         let fileManager = FileManager.default
 
         guard codexDirectoryExists(fileManager: fileManager, directoryURL: codexDirectoryURL) else {
@@ -67,7 +67,7 @@ struct CodexHookInstaller {
         return hooksWritten && featureEnabled
     }
 
-    static func upsertHooksJSON(from existingData: Data?, command: String) -> Data? {
+    nonisolated static func upsertHooksJSON(from existingData: Data?, command: String) -> Data? {
         var json: [String: Any] = [:]
         if let existingData,
            let existing = try? JSONSerialization.jsonObject(with: existingData) as? [String: Any] {
@@ -128,7 +128,7 @@ struct CodexHookInstaller {
         )
     }
 
-    static func upsertFeatureFlag(in existingContents: String?) -> String {
+    nonisolated static func upsertFeatureFlag(in existingContents: String?) -> String {
         let featureLine = "codex_hooks = true"
         var text = existingContents ?? ""
 
@@ -157,7 +157,7 @@ struct CodexHookInstaller {
         return text + "\n[features]\n\(featureLine)\n"
     }
 
-    static func isHookInstalled(in hooksData: Data?) -> Bool {
+    nonisolated static func isHookInstalled(in hooksData: Data?) -> Bool {
         guard let hooksData,
               let json = try? JSONSerialization.jsonObject(with: hooksData) as? [String: Any],
               let hooks = json["hooks"] as? [String: Any] else {
@@ -175,7 +175,7 @@ struct CodexHookInstaller {
         }
     }
 
-    static func isFeatureEnabled(in configContents: String?) -> Bool {
+    nonisolated static func isFeatureEnabled(in configContents: String?) -> Bool {
         guard let configContents else { return false }
         return configContents.range(
             of: #"(?m)^[ \t]*codex_hooks[ \t]*=[ \t]*true[ \t]*$"#,
@@ -183,20 +183,20 @@ struct CodexHookInstaller {
         ) != nil
     }
 
-    static func isInstalled() -> Bool {
+    nonisolated static func isInstalled() -> Bool {
         let hooksData = try? Data(contentsOf: hooksJSONURL)
         let configContents = try? String(contentsOf: configURL, encoding: .utf8)
         return isHookInstalled(in: hooksData) && isFeatureEnabled(in: configContents)
     }
 
-    static func codexDirectoryExists(
+    nonisolated static func codexDirectoryExists(
         fileManager: FileManager = .default,
         directoryURL: URL = codexDirectoryURL
     ) -> Bool {
         fileManager.fileExists(atPath: directoryURL.path)
     }
 
-    private static func makeHookGroup(
+    nonisolated private static func makeHookGroup(
         matcher: String?,
         command: String,
         timeout: Int? = nil
@@ -220,7 +220,7 @@ struct CodexHookInstaller {
         return group
     }
 
-    private static func updateHooksJSON(at url: URL, command: String) -> Bool {
+    nonisolated private static func updateHooksJSON(at url: URL, command: String) -> Bool {
         let existingData = try? Data(contentsOf: url)
 
         guard let data = upsertHooksJSON(from: existingData, command: command) else {
@@ -238,7 +238,7 @@ struct CodexHookInstaller {
         }
     }
 
-    private static func updateConfig(at url: URL) -> Bool {
+    nonisolated private static func updateConfig(at url: URL) -> Bool {
         let existingContents = try? String(contentsOf: url, encoding: .utf8)
         let updatedContents = upsertFeatureFlag(in: existingContents)
 

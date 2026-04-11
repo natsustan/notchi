@@ -12,11 +12,15 @@ extension Notification.Name {
 final class SessionStore {
     static let shared = SessionStore()
 
-    private(set) var sessions: [String: SessionData] = [:]
-    private(set) var selectedSessionId: String?
+    private(set) var sessions: [ProviderSessionKey: SessionData] = [:]
+    private(set) var selectedSessionKey: ProviderSessionKey?
     private var displaySessionNumbersById: [String: Int] = [:]
 
     private init() {}
+
+    var selectedSessionId: String? {
+        selectedSessionKey?.stableId
+    }
 
     var sortedSessions: [SessionData] {
         sessions.values.sorted { lhs, rhs in
@@ -32,8 +36,8 @@ final class SessionStore {
     }
 
     var selectedSession: SessionData? {
-        guard let id = selectedSessionId else { return nil }
-        return sessions[id]
+        guard let selectedSessionKey else { return nil }
+        return sessions[selectedSessionKey]
     }
 
     var effectiveSession: SessionData? {
@@ -46,12 +50,20 @@ final class SessionStore {
         return sortedSessions.first
     }
 
-    func selectSession(_ sessionId: String?) {
-        if let id = sessionId {
-            guard sessions[id] != nil else { return }
-        }
-        selectedSessionId = sessionId
-        logger.info("Selected session: \(sessionId ?? "nil", privacy: .public)")
+    func selectSession(_ sessionKey: ProviderSessionKey) {
+        guard sessions[sessionKey] != nil else { return }
+        selectedSessionKey = sessionKey
+        logger.info("Selected session: \(sessionKey.stableId, privacy: .public)")
+    }
+
+    func selectSession(matchingStableId stableId: String) {
+        guard let sessionKey = ProviderSessionKey(stableId: stableId) else { return }
+        selectSession(sessionKey)
+    }
+
+    func clearSelectedSession() {
+        selectedSessionKey = nil
+        logger.info("Selected session: nil")
     }
 
     func process(_ event: HookEvent) -> SessionData {
@@ -115,15 +127,10 @@ final class SessionStore {
 
         case .sessionEnded:
             session.endSession()
-            removeSession(event.sessionId)
+            removeSession(event.sessionKey)
         }
 
         return session
-    }
-
-    func recordAssistantMessages(_ messages: [AssistantMessage], for sessionId: String) {
-        guard let session = sessions[sessionId] else { return }
-        session.recordAssistantMessages(messages)
     }
 
     func displaySessionNumber(for session: SessionData) -> Int {
@@ -143,7 +150,7 @@ final class SessionStore {
     }
 
     private func getOrCreateSession(sessionKey: ProviderSessionKey, cwd: String, isInteractive: Bool) -> SessionData {
-        if let existing = sessions[sessionKey.stableId] {
+        if let existing = sessions[sessionKey] {
             return existing
         }
 
@@ -154,7 +161,7 @@ final class SessionStore {
             isInteractive: isInteractive,
             existingXPositions: existingXPositions
         )
-        sessions[session.id] = session
+        sessions[sessionKey] = session
         recomputeDisplaySessionNumbers()
         logger.info(
             "Created \(session.provider.rawValue, privacy: .public) session #\(self.displaySessionNumber(for: session)): \(session.rawSessionId, privacy: .public) at \(cwd, privacy: .public)"
@@ -162,36 +169,46 @@ final class SessionStore {
         postActiveSessionCountChange()
 
         if activeSessionCount == 1 {
-            selectedSessionId = session.id
+            selectedSessionKey = session.sessionKey
         } else {
-            selectedSessionId = nil
+            selectedSessionKey = nil
         }
 
         return session
     }
 
-    private func removeSession(_ sessionId: String) {
-        sessions.removeValue(forKey: sessionId)
+    private func removeSession(_ sessionKey: ProviderSessionKey) {
+        sessions.removeValue(forKey: sessionKey)
         recomputeDisplaySessionNumbers()
-        logger.info("Removed session: \(sessionId, privacy: .public)")
+        logger.info("Removed session: \(sessionKey.stableId, privacy: .public)")
         postActiveSessionCountChange()
 
-        if selectedSessionId == sessionId {
-            selectedSessionId = nil
+        if selectedSessionKey == sessionKey {
+            selectedSessionKey = nil
         }
 
-        if activeSessionCount == 1 {
-            selectedSessionId = sessions.keys.first
+        if selectedSessionKey == nil, activeSessionCount == 1 {
+            selectedSessionKey = sessions.keys.first
         }
     }
 
-    func dismissSession(_ sessionId: String) {
-        sessions[sessionId]?.endSession()
-        removeSession(sessionId)
+    func dismissSession(_ sessionKey: ProviderSessionKey) {
+        sessions[sessionKey]?.endSession()
+        removeSession(sessionKey)
+    }
+
+    func dismissSession(matchingStableId stableId: String) {
+        guard let sessionKey = ProviderSessionKey(stableId: stableId) else { return }
+        dismissSession(sessionKey)
     }
 
     func recordAssistantMessages(_ messages: [AssistantMessage], for sessionKey: ProviderSessionKey) {
-        recordAssistantMessages(messages, for: sessionKey.stableId)
+        guard let session = sessions[sessionKey] else { return }
+        session.recordAssistantMessages(messages)
+    }
+
+    func session(for sessionKey: ProviderSessionKey) -> SessionData? {
+        sessions[sessionKey]
     }
 
     private func postActiveSessionCountChange() {

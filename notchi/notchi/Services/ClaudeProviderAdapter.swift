@@ -1,23 +1,28 @@
 import Foundation
 
 struct ClaudeProviderAdapter: AgentProviderAdapter {
-    let provider: AgentProvider = .claude
+    nonisolated let provider: AgentProvider = .claude
+    nonisolated init() {}
 
     @discardableResult
-    func installIfNeeded() -> Bool {
+    nonisolated func installIfNeeded() -> Bool {
         HookInstaller.installIfNeeded()
     }
 
-    func isInstalled() -> Bool {
+    nonisolated func isProviderAvailable() -> Bool {
+        HookInstaller.claudeConfigDirectoryExists()
+    }
+
+    nonisolated func isInstalled() -> Bool {
         HookInstaller.isInstalled()
     }
 
-    func configureForLaunch() {
+    nonisolated func configureForLaunch() {
         let claudeConfig = ClaudeConfigDirectoryResolver.resolve()
         ConversationParser.configureClaudeProjectsRootPath(using: claudeConfig)
     }
 
-    func normalize(_ envelope: AgentHookEnvelope) -> HookEvent? {
+    nonisolated func normalize(_ envelope: AgentHookEnvelope) -> HookEvent? {
         guard let event = NormalizedAgentEvent.claudeEvent(named: envelope.event) else {
             return nil
         }

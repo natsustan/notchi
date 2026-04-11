@@ -4,8 +4,8 @@ import XCTest
 @MainActor
 final class SessionStoreTests: XCTestCase {
     override func tearDown() async throws {
-        let sessionIds = Array(SessionStore.shared.sessions.keys)
-        sessionIds.forEach { SessionStore.shared.dismissSession($0) }
+        let sessionKeys = Array(SessionStore.shared.sessions.keys)
+        sessionKeys.forEach { SessionStore.shared.dismissSession($0) }
         try await super.tearDown()
     }
 
@@ -76,8 +76,8 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.displaySessionNumber(for: second), 2)
         XCTAssertEqual(store.displaySessionNumber(for: third), 3)
 
-        store.dismissSession(first.id)
-        store.dismissSession(second.id)
+        store.dismissSession(first.sessionKey)
+        store.dismissSession(second.sessionKey)
 
         XCTAssertEqual(store.displaySessionNumber(for: third), 1)
         XCTAssertEqual(store.displaySessionLabel(for: third), "notchi #1")
@@ -110,6 +110,8 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.displaySessionNumber(for: codex), 2)
         XCTAssertEqual(store.displaySessionLabel(for: claude), "notchi #1")
         XCTAssertEqual(store.displaySessionLabel(for: codex), "notchi #2")
+        XCTAssertNotNil(store.sessions[claude.sessionKey])
+        XCTAssertNotNil(store.sessions[codex.sessionKey])
     }
 
     private func makeEvent(

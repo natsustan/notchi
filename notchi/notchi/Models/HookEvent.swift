@@ -11,11 +11,11 @@ enum NormalizedAgentEvent: String, CaseIterable, Codable, Sendable {
     case subagentStop = "SubagentStop"
     case sessionEnded = "SessionEnd"
 
-    static func claudeEvent(named rawValue: String) -> Self? {
+    nonisolated static func claudeEvent(named rawValue: String) -> Self? {
         Self(rawValue: rawValue)
     }
 
-    static func codexEvent(named rawValue: String) -> Self? {
+    nonisolated static func codexEvent(named rawValue: String) -> Self? {
         switch rawValue {
         case "SessionStart":
             .sessionStarted
@@ -63,7 +63,7 @@ struct AgentHookEnvelope: Decodable, Sendable {
         case model
     }
 
-    init(from decoder: Decoder) throws {
+    nonisolated init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
         provider = try container.decodeIfPresent(AgentProvider.self, forKey: .provider) ?? .claude
@@ -101,15 +101,15 @@ struct HookEvent: Sendable {
     let interactive: Bool?
     let model: String?
 
-    var sessionId: String {
+    nonisolated var sessionId: String {
         sessionKey.stableId
     }
 
-    var rawSessionId: String {
+    nonisolated var rawSessionId: String {
         sessionKey.rawSessionId
     }
 
-    init(
+    nonisolated init(
         provider: AgentProvider = .claude,
         rawSessionId: String,
         transcriptPath: String?,

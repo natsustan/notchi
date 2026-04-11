@@ -194,6 +194,22 @@ final class SocketServerTests: XCTestCase {
         XCTAssertTrue(delivered)
     }
 
+    func testPayloadWithCodexProviderDecodesAndPreservesProvider() async throws {
+        let recorder = EventRecorder()
+        let (_, path) = try await makeServer(clientReadTimeout: 0.5, recorder: recorder)
+
+        let client = try connectClient(to: path)
+        try client.send(makeEventPayload(sessionId: "codex-provider", provider: .codex))
+        client.closeConnection()
+
+        let delivered = await waitUntil(timeout: 0.5) {
+            let events = await recorder.snapshot()
+            return events.count == 1 && events.first?.provider == .codex
+        }
+
+        XCTAssertTrue(delivered)
+    }
+
     private func makeServer(
         at path: String? = nil,
         clientReadTimeout: TimeInterval,

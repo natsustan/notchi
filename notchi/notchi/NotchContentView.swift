@@ -368,7 +368,7 @@ struct NotchContentView: View {
             showingPanelSettings = false
         } else if showingSessionActivity {
             showingSessionActivity = false
-            sessionStore.selectSession(nil)
+            sessionStore.clearSelectedSession()
         }
     }
 
@@ -380,7 +380,7 @@ struct NotchContentView: View {
             haptics.playSessionSelection()
         }
 
-        sessionStore.selectSession(sessionId)
+        sessionStore.selectSession(matchingStableId: sessionId)
         showingSessionActivity = true
     }
 

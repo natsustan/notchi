@@ -145,6 +145,28 @@ final class ConversationParserTests: XCTestCase {
         XCTAssertNil(path)
     }
 
+    func testCodexAssistantMessageIdentifiersAreStableAcrossParserResets() async throws {
+        let sessionKey = ProviderSessionKey(provider: .codex, rawSessionId: "codex-\(UUID().uuidString)")
+        let transcriptPath = tempDirectoryURL
+            .appendingPathComponent("\(UUID().uuidString)-stable-id.jsonl")
+            .path
+        let parser = ConversationParser.shared
+
+        let line = """
+        {"timestamp":"2026-04-11T04:00:00.000Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Stable Codex ID"}],"phase":"commentary"}}
+        """
+        FileManager.default.createFile(atPath: transcriptPath, contents: Data((line + "\n").utf8))
+
+        let first = await parser.parseIncremental(sessionKey: sessionKey, transcriptPath: transcriptPath)
+        await parser.resetState(for: sessionKey)
+        let second = await parser.parseIncremental(sessionKey: sessionKey, transcriptPath: transcriptPath)
+        await parser.resetState(for: sessionKey)
+
+        XCTAssertEqual(first.messages.count, 1)
+        XCTAssertEqual(second.messages.count, 1)
+        XCTAssertEqual(first.messages.first?.id, second.messages.first?.id)
+    }
+
     private func assistantLine(uuid: String, text: String, model: String) -> String {
         let timestamp = "2026-04-07T09:50:04.954Z"
         return """

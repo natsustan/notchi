@@ -1,11 +1,14 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "SocketServer")
+nonisolated private let logger = Logger(subsystem: "com.ruban.notchi", category: "SocketServer")
 
 typealias AgentHookEnvelopeHandler = @Sendable (AgentHookEnvelope) -> Void
 
-final class SocketServer {
+// WHY: SocketServer owns its synchronization via serverQueue/clientQueue rather
+// than the main actor, so it should not inherit the project's default UI
+// isolation.
+nonisolated final class SocketServer: @unchecked Sendable {
     static let socketPath = "/tmp/notchi.sock"
     static let shared = SocketServer(socketPath: socketPath, clientReadTimeout: 0.5)
 
