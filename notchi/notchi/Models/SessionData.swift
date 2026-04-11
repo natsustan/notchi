@@ -13,6 +13,9 @@ struct PendingQuestion {
 @Observable
 final class SessionData: Identifiable {
     let id: String
+    let provider: AgentProvider
+    let rawSessionId: String
+    let sessionKey: ProviderSessionKey
     let cwd: String
     let sessionStartTime: Date
     let spriteXPosition: CGFloat
@@ -76,18 +79,36 @@ final class SessionData: Identifiable {
     private static let yOffsetBase: CGFloat = -5.0
     private static let yOffsetRange: UInt = 51
 
-    init(sessionId: String, cwd: String, isInteractive: Bool = true, existingXPositions: [CGFloat] = []) {
-        self.id = sessionId
+    init(sessionKey: ProviderSessionKey, cwd: String, isInteractive: Bool = true, existingXPositions: [CGFloat] = []) {
+        self.id = sessionKey.stableId
+        self.provider = sessionKey.provider
+        self.rawSessionId = sessionKey.rawSessionId
+        self.sessionKey = sessionKey
         self.cwd = cwd
         self.isInteractive = isInteractive
         self.sessionStartTime = Date()
         self.lastActivity = Date()
 
-        let hash = UInt(bitPattern: sessionId.hashValue)
+        let hash = UInt(bitPattern: sessionKey.stableId.hashValue)
         self.spriteXPosition = Self.resolveXPosition(hash: hash, existingPositions: existingXPositions)
         self.spriteYOffset = Self.resolveYOffset(hash: hash)
 
         startDurationTimer()
+    }
+
+    convenience init(
+        sessionId: String,
+        provider: AgentProvider = .claude,
+        cwd: String,
+        isInteractive: Bool = true,
+        existingXPositions: [CGFloat] = []
+    ) {
+        self.init(
+            sessionKey: ProviderSessionKey(provider: provider, rawSessionId: sessionId),
+            cwd: cwd,
+            isInteractive: isInteractive,
+            existingXPositions: existingXPositions
+        )
     }
 
     private static func resolveXPosition(hash: UInt, existingPositions: [CGFloat]) -> CGFloat {

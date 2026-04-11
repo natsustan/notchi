@@ -11,9 +11,9 @@ final class NotchiStateMachine {
     let sessionStore = SessionStore.shared
 
     private var emotionDecayTimer: Task<Void, Never>?
-    private var pendingSyncTasks: [String: Task<Void, Never>] = [:]
-    private var pendingPositionMarks: [String: Task<Void, Never>] = [:]
-    private var fileWatchers: [String: (source: DispatchSourceFileSystemObject, fd: Int32)] = [:]
+    private var pendingSyncTasks: [ProviderSessionKey: Task<Void, Never>] = [:]
+    private var pendingPositionMarks: [ProviderSessionKey: Task<Void, Never>] = [:]
+    private var fileWatchers: [ProviderSessionKey: (source: DispatchSourceFileSystemObject, fd: Int32)] = [:]
     var handleClaudeUsageResumeTrigger: (ClaudeUsageResumeTrigger) -> Void = { trigger in
         ClaudeUsageService.shared.handleClaudeResumeTrigger(trigger)
     }
@@ -33,59 +33,77 @@ final class NotchiStateMachine {
         let session = sessionStore.process(event)
         let isDone = event.status == "waiting_for_input"
         let transcriptPath = ConversationParser.resolvedTranscriptPath(
-            sessionId: event.sessionId,
+            for: event.provider,
+            sessionId: event.rawSessionId,
             cwd: event.cwd,
             transcriptPath: event.transcriptPath
         )
 
         switch event.event {
-        case "UserPromptSubmit":
-            pendingPositionMarks[event.sessionId] = Task {
-                await ConversationParser.shared.markCurrentPosition(
-                    sessionId: event.sessionId,
-                    transcriptPath: transcriptPath
-                )
-            }
-            if session.isInteractive {
-                startFileWatcher(sessionId: event.sessionId, transcriptPath: transcriptPath)
+        case .userPromptSubmitted:
+            if let transcriptPath {
+                pendingPositionMarks[event.sessionKey] = Task {
+                    await ConversationParser.shared.markCurrentPosition(
+                        sessionKey: event.sessionKey,
+                        transcriptPath: transcriptPath
+                    )
+                }
+            } else {
+                pendingPositionMarks.removeValue(forKey: event.sessionKey)?.cancel()
             }
 
-            if session.isInteractive, let prompt = event.userPrompt {
+            if session.isInteractive, let transcriptPath {
+                startFileWatcher(sessionKey: event.sessionKey, transcriptPath: transcriptPath)
+            }
+
+            if session.isInteractive,
+               event.provider.capabilities.supportsPromptEmotionAnalysis,
+               let prompt = event.userPrompt {
                 Task {
                     let result = await EmotionAnalyzer.shared.analyze(prompt)
                     session.emotionState.recordEmotion(result.emotion, intensity: result.intensity, prompt: prompt)
                 }
             }
 
-            if session.isInteractive, !SessionStore.isLocalSlashCommand(event.userPrompt) {
+            if session.isInteractive,
+               event.provider.capabilities.supportsUsageResumeTriggers,
+               !SessionStore.isLocalSlashCommand(event.userPrompt) {
                 handleClaudeUsageResumeTrigger(.userPromptSubmit)
             }
 
-        case "PreToolUse":
+        case .preToolUse:
             if isDone {
                 SoundService.shared.playNotificationSound(sessionId: event.sessionId, isInteractive: session.isInteractive)
             }
 
-        case "PermissionRequest":
+        case .permissionRequest:
+            if event.provider.capabilities.supportsPermissionPrompts {
+                SoundService.shared.playNotificationSound(sessionId: event.sessionId, isInteractive: session.isInteractive)
+            }
+
+        case .postToolUse:
+            if let transcriptPath {
+                scheduleFileSync(sessionKey: event.sessionKey, transcriptPath: transcriptPath)
+            }
+
+        case .sessionStarted:
+            if event.provider.capabilities.supportsUsageResumeTriggers {
+                handleClaudeUsageResumeTrigger(.sessionStart)
+            }
+
+        case .stop:
             SoundService.shared.playNotificationSound(sessionId: event.sessionId, isInteractive: session.isInteractive)
+            stopFileWatcher(sessionKey: event.sessionKey)
+            if let transcriptPath {
+                scheduleFileSync(sessionKey: event.sessionKey, transcriptPath: transcriptPath)
+            }
 
-        case "PostToolUse":
-            scheduleFileSync(sessionId: event.sessionId, transcriptPath: transcriptPath)
-
-        case "SessionStart":
-            handleClaudeUsageResumeTrigger(.sessionStart)
-
-        case "Stop":
-            SoundService.shared.playNotificationSound(sessionId: event.sessionId, isInteractive: session.isInteractive)
-            stopFileWatcher(sessionId: event.sessionId)
-            scheduleFileSync(sessionId: event.sessionId, transcriptPath: transcriptPath)
-
-        case "SessionEnd":
-            stopFileWatcher(sessionId: event.sessionId)
-            pendingSyncTasks.removeValue(forKey: event.sessionId)?.cancel()
-            pendingPositionMarks.removeValue(forKey: event.sessionId)?.cancel()
+        case .sessionEnded:
+            stopFileWatcher(sessionKey: event.sessionKey)
+            pendingSyncTasks.removeValue(forKey: event.sessionKey)?.cancel()
+            pendingPositionMarks.removeValue(forKey: event.sessionKey)?.cancel()
             SoundService.shared.clearCooldown(for: event.sessionId)
-            Task { await ConversationParser.shared.resetState(for: event.sessionId) }
+            Task { await ConversationParser.shared.resetState(for: event.sessionKey) }
             if sessionStore.activeSessionCount == 0 {
                 logger.info("Global state: idle")
             }
@@ -100,36 +118,35 @@ final class NotchiStateMachine {
         session.resetSleepTimer()
     }
 
-    private func scheduleFileSync(sessionId: String, transcriptPath: String) {
-        pendingSyncTasks[sessionId]?.cancel()
-        pendingSyncTasks[sessionId] = Task {
-            // Wait for position marking to complete first
-            await pendingPositionMarks[sessionId]?.value
+    private func scheduleFileSync(sessionKey: ProviderSessionKey, transcriptPath: String) {
+        pendingSyncTasks[sessionKey]?.cancel()
+        pendingSyncTasks[sessionKey] = Task {
+            await pendingPositionMarks[sessionKey]?.value
 
             try? await Task.sleep(for: Self.syncDebounce)
             guard !Task.isCancelled else { return }
 
             let result = await ConversationParser.shared.parseIncremental(
-                sessionId: sessionId,
+                sessionKey: sessionKey,
                 transcriptPath: transcriptPath
             )
 
             if !result.messages.isEmpty {
-                sessionStore.recordAssistantMessages(result.messages, for: sessionId)
+                sessionStore.recordAssistantMessages(result.messages, for: sessionKey)
             }
 
             reconcileFileSyncResult(
                 result,
-                for: sessionId,
-                hasActiveWatcher: fileWatchers[sessionId] != nil
+                for: sessionKey,
+                hasActiveWatcher: fileWatchers[sessionKey] != nil
             )
 
-            pendingSyncTasks.removeValue(forKey: sessionId)
+            pendingSyncTasks.removeValue(forKey: sessionKey)
         }
     }
 
-    func reconcileFileSyncResult(_ result: ParseResult, for sessionId: String, hasActiveWatcher: Bool) {
-        guard let session = sessionStore.sessions[sessionId] else { return }
+    func reconcileFileSyncResult(_ result: ParseResult, for sessionKey: ProviderSessionKey, hasActiveWatcher: Bool) {
+        guard let session = sessionStore.sessions[sessionKey.stableId] else { return }
 
         if !result.messages.isEmpty,
            session.isInteractive,
@@ -149,8 +166,8 @@ final class NotchiStateMachine {
         }
     }
 
-    private func startFileWatcher(sessionId: String, transcriptPath: String) {
-        stopFileWatcher(sessionId: sessionId)
+    private func startFileWatcher(sessionKey: ProviderSessionKey, transcriptPath: String) {
+        stopFileWatcher(sessionKey: sessionKey)
 
         let fd = open(transcriptPath, O_EVTONLY)
         guard fd >= 0 else {
@@ -165,7 +182,7 @@ final class NotchiStateMachine {
         )
 
         source.setEventHandler { [weak self] in
-            self?.scheduleFileSync(sessionId: sessionId, transcriptPath: transcriptPath)
+            self?.scheduleFileSync(sessionKey: sessionKey, transcriptPath: transcriptPath)
         }
 
         source.setCancelHandler {
@@ -173,14 +190,14 @@ final class NotchiStateMachine {
         }
 
         source.resume()
-        fileWatchers[sessionId] = (source: source, fd: fd)
-        logger.debug("Started file watcher for session \(sessionId)")
+        fileWatchers[sessionKey] = (source: source, fd: fd)
+        logger.debug("Started file watcher for session \(sessionKey.stableId, privacy: .public)")
     }
 
-    private func stopFileWatcher(sessionId: String) {
-        guard let watcher = fileWatchers.removeValue(forKey: sessionId) else { return }
+    private func stopFileWatcher(sessionKey: ProviderSessionKey) {
+        guard let watcher = fileWatchers.removeValue(forKey: sessionKey) else { return }
         watcher.source.cancel()
-        logger.debug("Stopped file watcher for session \(sessionId)")
+        logger.debug("Stopped file watcher for session \(sessionKey.stableId, privacy: .public)")
     }
 
     private func startEmotionDecayTimer() {

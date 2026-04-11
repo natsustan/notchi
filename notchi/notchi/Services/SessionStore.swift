@@ -56,8 +56,8 @@ final class SessionStore {
 
     func process(_ event: HookEvent) -> SessionData {
         let isInteractive = event.interactive ?? true
-        let session = getOrCreateSession(sessionId: event.sessionId, cwd: event.cwd, isInteractive: isInteractive)
-        let isProcessing = event.status != "waiting_for_input"
+        let session = getOrCreateSession(sessionKey: event.sessionKey, cwd: event.cwd, isInteractive: isInteractive)
+        let isProcessing = Self.isProcessingStatus(event.status)
         session.updateProcessingState(isProcessing: isProcessing)
 
         if let mode = event.permissionMode {
@@ -65,7 +65,7 @@ final class SessionStore {
         }
 
         switch event.event {
-        case "UserPromptSubmit":
+        case .userPromptSubmitted:
             if let prompt = event.userPrompt {
                 session.recordUserPrompt(prompt)
             }
@@ -79,15 +79,15 @@ final class SessionStore {
                 session.updateTask(.working)
             }
 
-        case "PreCompact":
+        case .preCompact:
             session.updateTask(.compacting)
 
-        case "SessionStart":
+        case .sessionStarted:
             if isProcessing {
                 session.updateTask(.working)
             }
 
-        case "PreToolUse":
+        case .preToolUse:
             let toolInput = event.toolInput?.mapValues { $0.value }
             session.recordPreToolUse(tool: event.tool, toolInput: toolInput, toolUseId: event.toolUseId)
             if event.tool == "AskUserQuestion" {
@@ -98,29 +98,24 @@ final class SessionStore {
                 session.updateTask(.working)
             }
 
-        case "PermissionRequest":
+        case .permissionRequest:
             let question = Self.buildPermissionQuestion(tool: event.tool, toolInput: event.toolInput)
             session.updateTask(.waiting)
             session.setPendingQuestions([question])
 
-        case "PostToolUse":
+        case .postToolUse:
             let success = event.status != "error"
             session.recordPostToolUse(tool: event.tool, toolUseId: event.toolUseId, success: success)
             session.clearPendingQuestions()
             session.updateTask(.working)
 
-        case "Stop", "SubagentStop":
+        case .stop, .subagentStop:
             session.clearPendingQuestions()
             session.updateTask(.idle)
 
-        case "SessionEnd":
+        case .sessionEnded:
             session.endSession()
             removeSession(event.sessionId)
-
-        default:
-            if !isProcessing && session.task != .idle {
-                session.updateTask(.idle)
-            }
         }
 
         return session
@@ -147,20 +142,27 @@ final class SessionStore {
         return label
     }
 
-    private func getOrCreateSession(sessionId: String, cwd: String, isInteractive: Bool) -> SessionData {
-        if let existing = sessions[sessionId] {
+    private func getOrCreateSession(sessionKey: ProviderSessionKey, cwd: String, isInteractive: Bool) -> SessionData {
+        if let existing = sessions[sessionKey.stableId] {
             return existing
         }
 
         let existingXPositions = sessions.values.map(\.spriteXPosition)
-        let session = SessionData(sessionId: sessionId, cwd: cwd, isInteractive: isInteractive, existingXPositions: existingXPositions)
-        sessions[sessionId] = session
+        let session = SessionData(
+            sessionKey: sessionKey,
+            cwd: cwd,
+            isInteractive: isInteractive,
+            existingXPositions: existingXPositions
+        )
+        sessions[session.id] = session
         recomputeDisplaySessionNumbers()
-        logger.info("Created session #\(self.displaySessionNumber(for: session)): \(sessionId, privacy: .public) at \(cwd, privacy: .public)")
+        logger.info(
+            "Created \(session.provider.rawValue, privacy: .public) session #\(self.displaySessionNumber(for: session)): \(session.rawSessionId, privacy: .public) at \(cwd, privacy: .public)"
+        )
         postActiveSessionCountChange()
 
         if activeSessionCount == 1 {
-            selectedSessionId = sessionId
+            selectedSessionId = session.id
         } else {
             selectedSessionId = nil
         }
@@ -186,6 +188,10 @@ final class SessionStore {
     func dismissSession(_ sessionId: String) {
         sessions[sessionId]?.endSession()
         removeSession(sessionId)
+    }
+
+    func recordAssistantMessages(_ messages: [AssistantMessage], for sessionKey: ProviderSessionKey) {
+        recordAssistantMessages(messages, for: sessionKey.stableId)
     }
 
     private func postActiveSessionCountChange() {
@@ -256,5 +262,9 @@ final class SessionStore {
                 (label: "No", description: nil),
             ]
         )
+    }
+
+    private static func isProcessingStatus(_ status: String) -> Bool {
+        status != "waiting_for_input" && status != "ended"
     }
 }

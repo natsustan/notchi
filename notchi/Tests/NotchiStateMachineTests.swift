@@ -21,12 +21,12 @@ final class NotchiStateMachineTests: XCTestCase {
             session.updateTask(initialTask)
             session.updateProcessingState(isProcessing: false)
 
-            stateMachine.reconcileFileSyncResult(result, for: sessionId, hasActiveWatcher: true)
+            stateMachine.reconcileFileSyncResult(result, for: session.sessionKey, hasActiveWatcher: true)
 
             XCTAssertEqual(session.task, .working)
             XCTAssertTrue(session.isProcessing)
 
-            SessionStore.shared.dismissSession(sessionId)
+            SessionStore.shared.dismissSession(session.id)
         }
     }
 
@@ -35,13 +35,13 @@ final class NotchiStateMachineTests: XCTestCase {
         let sessionId = "stop-\(UUID().uuidString)"
         let session = makeInteractiveSession(sessionId: sessionId)
 
-        _ = SessionStore.shared.process(makeEvent(sessionId: sessionId, event: "Stop", status: "waiting_for_input"))
+        _ = SessionStore.shared.process(makeEvent(sessionId: sessionId, event: .stop, status: "waiting_for_input"))
         XCTAssertEqual(session.task, .idle)
         XCTAssertFalse(session.isProcessing)
 
         let result = ParseResult(messages: [makeAssistantMessage()], interrupted: false)
-        SessionStore.shared.recordAssistantMessages(result.messages, for: sessionId)
-        stateMachine.reconcileFileSyncResult(result, for: sessionId, hasActiveWatcher: false)
+        SessionStore.shared.recordAssistantMessages(result.messages, for: session.id)
+        stateMachine.reconcileFileSyncResult(result, for: session.sessionKey, hasActiveWatcher: false)
 
         XCTAssertEqual(session.task, .idle)
         XCTAssertFalse(session.isProcessing)
@@ -56,7 +56,7 @@ final class NotchiStateMachineTests: XCTestCase {
 
         stateMachine.handleEvent(makeEvent(
             sessionId: "session-start-\(UUID().uuidString)",
-            event: "SessionStart",
+            event: .sessionStarted,
             status: "processing"
         ))
 
@@ -72,7 +72,7 @@ final class NotchiStateMachineTests: XCTestCase {
 
         stateMachine.handleEvent(makeEvent(
             sessionId: "prompt-submit-\(UUID().uuidString)",
-            event: "UserPromptSubmit",
+            event: .userPromptSubmitted,
             status: "processing",
             userPrompt: "hello"
         ))
@@ -89,7 +89,7 @@ final class NotchiStateMachineTests: XCTestCase {
 
         stateMachine.handleEvent(makeEvent(
             sessionId: "local-prompt-\(UUID().uuidString)",
-            event: "UserPromptSubmit",
+            event: .userPromptSubmitted,
             status: "processing",
             userPrompt: "/help"
         ))
@@ -106,7 +106,7 @@ final class NotchiStateMachineTests: XCTestCase {
 
         stateMachine.handleEvent(makeEvent(
             sessionId: "noninteractive-prompt-\(UUID().uuidString)",
-            event: "UserPromptSubmit",
+            event: .userPromptSubmitted,
             status: "processing",
             userPrompt: "hello",
             interactive: false
@@ -115,7 +115,7 @@ final class NotchiStateMachineTests: XCTestCase {
         XCTAssertTrue(receivedTriggers.isEmpty)
     }
 
-    func testHookEventAllowsMissingTranscriptPathForStaleHooks() throws {
+    func testAgentHookEnvelopeAllowsMissingTranscriptPathForStaleHooks() throws {
         let data = try JSONSerialization.data(withJSONObject: [
             "session_id": "stale-hook",
             "cwd": "/tmp",
@@ -123,16 +123,35 @@ final class NotchiStateMachineTests: XCTestCase {
             "status": "waiting_for_input",
         ])
 
-        let event = try JSONDecoder().decode(HookEvent.self, from: data)
+        let event = try JSONDecoder().decode(AgentHookEnvelope.self, from: data)
 
         XCTAssertNil(event.transcriptPath)
         XCTAssertEqual(event.sessionId, "stale-hook")
+        XCTAssertEqual(event.provider, .claude)
+    }
+
+    func testCodexPromptSubmitDoesNotForwardToClaudeUsageHandler() {
+        let stateMachine = NotchiStateMachine.shared
+        var receivedTriggers: [ClaudeUsageResumeTrigger] = []
+        stateMachine.handleClaudeUsageResumeTrigger = { trigger in
+            receivedTriggers.append(trigger)
+        }
+
+        stateMachine.handleEvent(makeEvent(
+            sessionId: "codex-prompt-\(UUID().uuidString)",
+            provider: .codex,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "hello"
+        ))
+
+        XCTAssertTrue(receivedTriggers.isEmpty)
     }
 
     private func makeInteractiveSession(sessionId: String) -> SessionData {
         SessionStore.shared.process(makeEvent(
             sessionId: sessionId,
-            event: "UserPromptSubmit",
+            event: .userPromptSubmitted,
             status: "processing",
             userPrompt: "hello"
         ))
@@ -144,13 +163,15 @@ final class NotchiStateMachineTests: XCTestCase {
 
     private func makeEvent(
         sessionId: String,
-        event: String,
+        provider: AgentProvider = .claude,
+        event: NormalizedAgentEvent,
         status: String,
         userPrompt: String? = nil,
         interactive: Bool = true
     ) -> HookEvent {
         HookEvent(
-            sessionId: sessionId,
+            provider: provider,
+            rawSessionId: sessionId,
             transcriptPath: nil,
             cwd: "/tmp",
             event: event,

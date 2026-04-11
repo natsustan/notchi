@@ -15,14 +15,14 @@ final class SessionStoreTests: XCTestCase {
 
         let session = store.process(makeEvent(
             sessionId: sessionId,
-            event: "UserPromptSubmit",
+            event: .userPromptSubmitted,
             status: "processing",
             userPrompt: "first"
         ))
 
         _ = store.process(makeEvent(
             sessionId: sessionId,
-            event: "PreToolUse",
+            event: .preToolUse,
             status: "processing",
             tool: "Read",
             toolUseId: "tool-1"
@@ -36,7 +36,7 @@ final class SessionStoreTests: XCTestCase {
 
         _ = store.process(makeEvent(
             sessionId: sessionId,
-            event: "UserPromptSubmit",
+            event: .userPromptSubmitted,
             status: "processing",
             userPrompt: "second"
         ))
@@ -53,21 +53,21 @@ final class SessionStoreTests: XCTestCase {
         let first = store.process(makeEvent(
             sessionId: "renumber-1-\(UUID().uuidString)",
             cwd: cwd,
-            event: "UserPromptSubmit",
+            event: .userPromptSubmitted,
             status: "processing",
             userPrompt: "one"
         ))
         let second = store.process(makeEvent(
             sessionId: "renumber-2-\(UUID().uuidString)",
             cwd: cwd,
-            event: "UserPromptSubmit",
+            event: .userPromptSubmitted,
             status: "processing",
             userPrompt: "two"
         ))
         let third = store.process(makeEvent(
             sessionId: "renumber-3-\(UUID().uuidString)",
             cwd: cwd,
-            event: "UserPromptSubmit",
+            event: .userPromptSubmitted,
             status: "processing",
             userPrompt: "three"
         ))
@@ -84,17 +84,47 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(store.displayTitle(for: third), "notchi #1 - three")
     }
 
+    func testMixedProvidersShareProjectNumberingAndAvoidIdentityCollisions() {
+        let store = SessionStore.shared
+        let cwd = "/tmp/notchi"
+
+        let claude = store.process(makeEvent(
+            sessionId: "shared-session",
+            provider: .claude,
+            cwd: cwd,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "claude"
+        ))
+        let codex = store.process(makeEvent(
+            sessionId: "shared-session",
+            provider: .codex,
+            cwd: cwd,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "codex"
+        ))
+
+        XCTAssertNotEqual(claude.id, codex.id)
+        XCTAssertEqual(store.displaySessionNumber(for: claude), 1)
+        XCTAssertEqual(store.displaySessionNumber(for: codex), 2)
+        XCTAssertEqual(store.displaySessionLabel(for: claude), "notchi #1")
+        XCTAssertEqual(store.displaySessionLabel(for: codex), "notchi #2")
+    }
+
     private func makeEvent(
         sessionId: String,
+        provider: AgentProvider = .claude,
         cwd: String = "/tmp",
-        event: String,
+        event: NormalizedAgentEvent,
         status: String,
         userPrompt: String? = nil,
         tool: String? = nil,
         toolUseId: String? = nil
     ) -> HookEvent {
         HookEvent(
-            sessionId: sessionId,
+            provider: provider,
+            rawSessionId: sessionId,
             transcriptPath: nil,
             cwd: cwd,
             event: event,
