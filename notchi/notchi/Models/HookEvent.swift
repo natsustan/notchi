@@ -124,8 +124,8 @@ struct HookEvent: Sendable {
     }
 }
 
-struct AnyCodable: Decodable, @unchecked Sendable {
-    nonisolated(unsafe) let value: Any
+nonisolated struct AnyCodable: Decodable, @unchecked Sendable {
+    let value: Any
 
     init(_ value: Any) {
         self.value = value

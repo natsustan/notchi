@@ -11,19 +11,19 @@ extension String {
     }
 }
 
-enum ToolStatus: Equatable {
+nonisolated enum ToolStatus: Equatable {
     case running
     case success
     case error
 }
 
-struct AssistantMessage: Identifiable {
+nonisolated struct AssistantMessage: Identifiable, Sendable {
     let id: String
     let text: String
     let timestamp: Date
 }
 
-struct SessionEvent: Identifiable {
+nonisolated struct SessionEvent: Identifiable {
     let id = UUID()
     let timestamp: Date
     let type: String

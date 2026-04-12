@@ -1,7 +1,7 @@
 import CryptoKit
 import Foundation
 
-struct ParseResult {
+nonisolated struct ParseResult: Sendable {
     let messages: [AssistantMessage]
     let interrupted: Bool
     let events: [ParsedSessionEvent]
@@ -13,7 +13,7 @@ struct ParseResult {
     }
 }
 
-struct ParsedSessionEvent: Sendable {
+nonisolated struct ParsedSessionEvent: Sendable {
     let id: String
     let event: NormalizedAgentEvent
     let status: String
@@ -22,7 +22,7 @@ struct ParsedSessionEvent: Sendable {
     let toolUseId: String?
 }
 
-private struct CodexToolCall: Sendable {
+nonisolated private struct CodexToolCall: Sendable {
     let tool: String
     let input: [String: AnyCodable]?
 }

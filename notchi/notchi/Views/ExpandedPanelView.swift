@@ -279,7 +279,11 @@ struct ExpandedPanelView: View {
                 }
 
                 if showIndicator && !isActivityCollapsed {
-                    WorkingIndicatorView(state: state, workingVerb: currentSpinnerVerb)
+                    WorkingIndicatorView(
+                        state: state,
+                        workingVerb: currentSpinnerVerb,
+                        color: effectiveSession?.provider.accentColor ?? TerminalColors.claudeOrange
+                    )
                 }
             }
             .padding(.horizontal, 12)
@@ -319,15 +323,11 @@ struct ExpandedPanelView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
                         if let session = effectiveSession {
-                            HStack(spacing: 6) {
-                                MorphingText(
-                                    text: sessionStore.displaySessionLabel(for: session),
-                                    font: .system(size: 11, weight: .medium),
-                                    color: TerminalColors.secondaryText
-                                )
-
-                                ProviderBadgeView(provider: session.provider)
-                            }
+                            MorphingText(
+                                text: sessionStore.displaySessionLabel(for: session),
+                                font: .system(size: 11, weight: .medium),
+                                color: TerminalColors.secondaryText
+                            )
                         }
 
                         Spacer()

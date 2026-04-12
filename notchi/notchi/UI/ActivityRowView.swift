@@ -177,6 +177,7 @@ struct QuestionPromptView: View {
 struct WorkingIndicatorView: View {
     let state: NotchiState
     let workingVerb: String
+    let color: Color
     @State private var dotCount = 1
     @State private var symbolPhase = 0
 
@@ -199,11 +200,11 @@ struct WorkingIndicatorView: View {
         HStack(spacing: 3) {
             Text(displaySymbol)
                 .font(.system(size: 14, weight: .bold))
-                .foregroundColor(TerminalColors.claudeOrange)
+                .foregroundColor(color)
                 .frame(width: 14, alignment: .center)
             Text(displayText)
                 .font(.system(size: 12, weight: .medium).italic())
-                .foregroundColor(TerminalColors.claudeOrange)
+                .foregroundColor(color)
         }
         .padding(.leading, -1)
         .onReceive(dotsTimer) { _ in

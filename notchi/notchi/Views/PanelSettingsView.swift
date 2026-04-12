@@ -14,7 +14,7 @@ private enum HookInstallBadgeState {
         case .notInstalled:
             "Not Installed"
         case .providerMissing:
-            "\(provider.badgeText) Missing"
+            "\(provider.displayName) Missing"
         case .error:
             "Error"
         }

@@ -1,17 +1,17 @@
 import Foundation
 
-struct ProviderCapabilities: Sendable {
+nonisolated struct ProviderCapabilities: Sendable {
     let supportsPermissionPrompts: Bool
     let supportsUsageResumeTriggers: Bool
     let supportsPromptEmotionAnalysis: Bool
     let supportsDerivedTranscriptFallback: Bool
 }
 
-enum AgentProvider: String, Codable, CaseIterable, Hashable, Sendable {
+nonisolated enum AgentProvider: String, Codable, CaseIterable, Hashable, Sendable {
     case claude
     case codex
 
-    nonisolated var badgeText: String {
+    var displayName: String {
         switch self {
         case .claude:
             "Claude"
@@ -20,7 +20,7 @@ enum AgentProvider: String, Codable, CaseIterable, Hashable, Sendable {
         }
     }
 
-    nonisolated var capabilities: ProviderCapabilities {
+    var capabilities: ProviderCapabilities {
         switch self {
         case .claude:
             ProviderCapabilities(
