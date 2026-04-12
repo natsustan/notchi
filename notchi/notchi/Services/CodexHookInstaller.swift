@@ -5,7 +5,6 @@ nonisolated private let codexHookLogger = Logger(subsystem: "com.ruban.notchi", 
 
 struct CodexHookInstaller {
     nonisolated private static let hookScriptName = "notchi-codex-hook.sh"
-    nonisolated private static let hookStatusMessage = "Syncing Notchi"
 
     nonisolated static var codexDirectoryURL: URL {
         FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".codex", isDirectory: true)
@@ -76,48 +75,15 @@ struct CodexHookInstaller {
 
         var hooks = json["hooks"] as? [String: Any] ?? [:]
 
-        let hookEvents: [(String, [[String: Any]])] = [
-            ("SessionStart", [makeHookGroup(matcher: "startup|resume", command: command)]),
-            ("UserPromptSubmit", [makeHookGroup(matcher: nil, command: command)]),
-            ("PreToolUse", [makeHookGroup(matcher: "Bash", command: command)]),
-            ("PostToolUse", [makeHookGroup(matcher: "Bash", command: command)]),
-            ("Stop", [makeHookGroup(matcher: nil, command: command, timeout: 30)]),
+        let desiredHookEvents: [String: [[String: Any]]] = [
+            "SessionStart": [makeHookGroup(matcher: "startup|resume", command: command)],
+            "UserPromptSubmit": [makeHookGroup(matcher: nil, command: command)],
+            "Stop": [makeHookGroup(matcher: nil, command: command, timeout: 30)],
         ]
 
-        for (event, config) in hookEvents {
-            if var existingEvent = hooks[event] as? [[String: Any]] {
-                var foundExistingHook = false
-
-                for index in existingEvent.indices {
-                    guard var entryHooks = existingEvent[index]["hooks"] as? [[String: Any]] else { continue }
-
-                    var didUpdateEntry = false
-                    for hookIndex in entryHooks.indices {
-                        let existingCommand = entryHooks[hookIndex]["command"] as? String ?? ""
-                        guard existingCommand.contains(hookScriptName) else { continue }
-
-                        foundExistingHook = true
-                        didUpdateEntry = true
-                        entryHooks[hookIndex]["command"] = command
-
-                        if event == "Stop" {
-                            entryHooks[hookIndex]["timeout"] = 30
-                        }
-                    }
-
-                    if didUpdateEntry {
-                        existingEvent[index]["hooks"] = entryHooks
-                    }
-                }
-
-                if !foundExistingHook {
-                    existingEvent.append(contentsOf: config)
-                }
-
-                hooks[event] = existingEvent
-            } else {
-                hooks[event] = config
-            }
+        for (event, desiredEntries) in desiredHookEvents {
+            let existingEntries = hooks[event] as? [[String: Any]] ?? []
+            hooks[event] = pruneManagedHooks(from: existingEntries) + desiredEntries
         }
 
         json["hooks"] = hooks
@@ -126,6 +92,27 @@ struct CodexHookInstaller {
             withJSONObject: json,
             options: [.prettyPrinted, .sortedKeys]
         )
+    }
+
+    nonisolated private static func pruneManagedHooks(from entries: [[String: Any]]) -> [[String: Any]] {
+        entries.compactMap { entry in
+            guard let entryHooks = entry["hooks"] as? [[String: Any]] else {
+                return entry
+            }
+
+            let filteredHooks = entryHooks.filter { hook in
+                let existingCommand = hook["command"] as? String ?? ""
+                return !existingCommand.contains(hookScriptName)
+            }
+
+            guard !filteredHooks.isEmpty else {
+                return nil
+            }
+
+            var updatedEntry = entry
+            updatedEntry["hooks"] = filteredHooks
+            return updatedEntry
+        }
     }
 
     nonisolated static func upsertFeatureFlag(in existingContents: String?) -> String {
@@ -204,7 +191,6 @@ struct CodexHookInstaller {
         var hook: [String: Any] = [
             "type": "command",
             "command": command,
-            "statusMessage": hookStatusMessage,
         ]
         if let timeout {
             hook["timeout"] = timeout

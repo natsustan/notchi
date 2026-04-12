@@ -21,10 +21,6 @@ enum NormalizedAgentEvent: String, CaseIterable, Codable, Sendable {
             .sessionStarted
         case "UserPromptSubmit":
             .userPromptSubmitted
-        case "PreToolUse":
-            .preToolUse
-        case "PostToolUse":
-            .postToolUse
         case "Stop":
             .stop
         default:

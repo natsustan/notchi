@@ -26,6 +26,11 @@ final class CodexHookInstallerTests: XCTestCase {
 
         let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: XCTUnwrap(data)) as? [String: Any])
         let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
+        XCTAssertNotNil(hooks["SessionStart"])
+        XCTAssertNotNil(hooks["UserPromptSubmit"])
+        XCTAssertNotNil(hooks["Stop"])
+        XCTAssertNil(hooks["PreToolUse"])
+        XCTAssertNil(hooks["PostToolUse"])
         let sessionStart = try XCTUnwrap(hooks["SessionStart"] as? [[String: Any]])
         let hookEntries = try XCTUnwrap(sessionStart.first?["hooks"] as? [[String: Any]])
         XCTAssertEqual(hookEntries.first?["command"] as? String, "/tmp/notchi-codex-hook.sh")

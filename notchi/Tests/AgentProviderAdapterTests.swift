@@ -35,17 +35,17 @@ final class AgentProviderAdapterTests: XCTestCase {
             "provider": "codex",
             "session_id": "codex-session",
             "cwd": "/tmp",
-            "event": "PreToolUse",
-            "status": "running_tool",
-            "tool": "Bash",
+            "event": "UserPromptSubmit",
+            "status": "processing",
+            "user_prompt": "hello",
         ])
         let envelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: data)
 
         let event = CodexProviderAdapter().normalize(envelope)
 
         XCTAssertEqual(event?.provider, .codex)
-        XCTAssertEqual(event?.event, .preToolUse)
-        XCTAssertEqual(event?.tool, "Bash")
+        XCTAssertEqual(event?.event, .userPromptSubmitted)
+        XCTAssertEqual(event?.userPrompt, "hello")
         XCTAssertEqual(event?.sessionId, "codex:codex-session")
     }
 
