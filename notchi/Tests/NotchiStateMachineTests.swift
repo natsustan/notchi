@@ -176,8 +176,6 @@ final class NotchiStateMachineTests: XCTestCase {
             cwd: "/tmp",
             event: event,
             status: status,
-            pid: nil,
-            tty: nil,
             tool: nil,
             toolInput: nil,
             toolUseId: nil,

@@ -34,15 +34,12 @@ struct ClaudeProviderAdapter: AgentProviderAdapter {
             cwd: envelope.cwd,
             event: event,
             status: envelope.status,
-            pid: envelope.pid,
-            tty: envelope.tty,
             tool: envelope.tool,
             toolInput: envelope.toolInput,
             toolUseId: envelope.toolUseId,
             userPrompt: envelope.userPrompt,
             permissionMode: envelope.permissionMode,
-            interactive: envelope.interactive,
-            model: envelope.model
+            interactive: envelope.interactive
         )
     }
 }

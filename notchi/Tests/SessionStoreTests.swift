@@ -131,8 +131,6 @@ final class SessionStoreTests: XCTestCase {
             cwd: cwd,
             event: event,
             status: status,
-            pid: nil,
-            tty: nil,
             tool: tool,
             toolInput: nil,
             toolUseId: toolUseId,

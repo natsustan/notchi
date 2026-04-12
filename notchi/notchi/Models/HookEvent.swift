@@ -40,27 +40,23 @@ struct AgentHookEnvelope: Decodable, Sendable {
     let cwd: String
     let event: String
     let status: String
-    let pid: Int?
-    let tty: String?
     let tool: String?
     let toolInput: [String: AnyCodable]?
     let toolUseId: String?
     let userPrompt: String?
     let permissionMode: String?
     let interactive: Bool?
-    let model: String?
 
     enum CodingKeys: String, CodingKey {
         case provider
         case sessionId = "session_id"
         case transcriptPath = "transcript_path"
-        case cwd, event, status, pid, tty, tool
+        case cwd, event, status, tool
         case toolInput = "tool_input"
         case toolUseId = "tool_use_id"
         case userPrompt = "user_prompt"
         case permissionMode = "permission_mode"
         case interactive
-        case model
     }
 
     nonisolated init(from decoder: Decoder) throws {
@@ -72,15 +68,12 @@ struct AgentHookEnvelope: Decodable, Sendable {
         cwd = try container.decode(String.self, forKey: .cwd)
         event = try container.decode(String.self, forKey: .event)
         status = try container.decode(String.self, forKey: .status)
-        pid = try container.decodeIfPresent(Int.self, forKey: .pid)
-        tty = try container.decodeIfPresent(String.self, forKey: .tty)
         tool = try container.decodeIfPresent(String.self, forKey: .tool)
         toolInput = try container.decodeIfPresent([String: AnyCodable].self, forKey: .toolInput)
         toolUseId = try container.decodeIfPresent(String.self, forKey: .toolUseId)
         userPrompt = try container.decodeIfPresent(String.self, forKey: .userPrompt)
         permissionMode = try container.decodeIfPresent(String.self, forKey: .permissionMode)
         interactive = try container.decodeIfPresent(Bool.self, forKey: .interactive)
-        model = try container.decodeIfPresent(String.self, forKey: .model)
     }
 }
 
@@ -91,15 +84,12 @@ struct HookEvent: Sendable {
     let cwd: String
     let event: NormalizedAgentEvent
     let status: String
-    let pid: Int?
-    let tty: String?
     let tool: String?
     let toolInput: [String: AnyCodable]?
     let toolUseId: String?
     let userPrompt: String?
     let permissionMode: String?
     let interactive: Bool?
-    let model: String?
 
     nonisolated var sessionId: String {
         sessionKey.stableId
@@ -116,15 +106,12 @@ struct HookEvent: Sendable {
         cwd: String,
         event: NormalizedAgentEvent,
         status: String,
-        pid: Int? = nil,
-        tty: String? = nil,
         tool: String? = nil,
         toolInput: [String: AnyCodable]? = nil,
         toolUseId: String? = nil,
         userPrompt: String? = nil,
         permissionMode: String? = nil,
-        interactive: Bool? = nil,
-        model: String? = nil
+        interactive: Bool? = nil
     ) {
         self.provider = provider
         self.sessionKey = ProviderSessionKey(provider: provider, rawSessionId: rawSessionId)
@@ -132,15 +119,12 @@ struct HookEvent: Sendable {
         self.cwd = cwd
         self.event = event
         self.status = status
-        self.pid = pid
-        self.tty = tty
         self.tool = tool
         self.toolInput = toolInput
         self.toolUseId = toolUseId
         self.userPrompt = userPrompt
         self.permissionMode = permissionMode
         self.interactive = interactive
-        self.model = model
     }
 }
 

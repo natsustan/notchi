@@ -253,8 +253,6 @@ final class SocketServerTests: XCTestCase {
             "cwd": "/tmp",
             "event": "SessionStart",
             "status": "waiting_for_input",
-            "pid": NSNull(),
-            "tty": NSNull(),
         ]
         if let provider {
             payload["provider"] = provider.rawValue

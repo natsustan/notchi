@@ -38,7 +38,6 @@ final class AgentProviderAdapterTests: XCTestCase {
             "event": "PreToolUse",
             "status": "running_tool",
             "tool": "Bash",
-            "model": "gpt-5.4",
         ])
         let envelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: data)
 
@@ -47,7 +46,6 @@ final class AgentProviderAdapterTests: XCTestCase {
         XCTAssertEqual(event?.provider, .codex)
         XCTAssertEqual(event?.event, .preToolUse)
         XCTAssertEqual(event?.tool, "Bash")
-        XCTAssertEqual(event?.model, "gpt-5.4")
         XCTAssertEqual(event?.sessionId, "codex:codex-session")
     }
 
