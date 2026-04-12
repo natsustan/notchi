@@ -127,6 +127,10 @@ struct HookEvent: Sendable {
 struct AnyCodable: Decodable, @unchecked Sendable {
     nonisolated(unsafe) let value: Any
 
+    init(_ value: Any) {
+        self.value = value
+    }
+
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
 

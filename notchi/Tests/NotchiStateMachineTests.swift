@@ -148,6 +148,41 @@ final class NotchiStateMachineTests: XCTestCase {
         XCTAssertTrue(receivedTriggers.isEmpty)
     }
 
+    func testApplyingParsedCodexSessionEventsRecordsBashActivity() {
+        let stateMachine = NotchiStateMachine.shared
+        let session = SessionStore.shared.process(makeEvent(
+            sessionId: "codex-events-\(UUID().uuidString)",
+            provider: .codex,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "hello"
+        ))
+
+        stateMachine.applyParsedSessionEvents([
+            ParsedSessionEvent(
+                id: "tool-start",
+                event: .preToolUse,
+                status: "running_tool",
+                tool: "Bash",
+                toolInput: ["command": AnyCodable("pwd")],
+                toolUseId: "call-123"
+            ),
+            ParsedSessionEvent(
+                id: "tool-end",
+                event: .postToolUse,
+                status: "processing",
+                tool: "Bash",
+                toolInput: nil,
+                toolUseId: "call-123"
+            ),
+        ], for: session.sessionKey)
+
+        XCTAssertEqual(session.recentEvents.count, 1)
+        XCTAssertEqual(session.recentEvents.first?.tool, "Bash")
+        XCTAssertEqual(session.recentEvents.first?.description, "pwd")
+        XCTAssertEqual(session.recentEvents.first?.status, .success)
+    }
+
     private func makeInteractiveSession(sessionId: String) -> SessionData {
         SessionStore.shared.process(makeEvent(
             sessionId: sessionId,

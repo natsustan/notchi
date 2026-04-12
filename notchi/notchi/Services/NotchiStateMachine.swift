@@ -87,6 +87,19 @@ final class NotchiStateMachine {
             }
 
         case .sessionStarted:
+            if event.provider == .codex, let transcriptPath {
+                pendingPositionMarks[event.sessionKey] = Task {
+                    await ConversationParser.shared.markCurrentPosition(
+                        sessionKey: event.sessionKey,
+                        transcriptPath: transcriptPath
+                    )
+                }
+
+                if session.isInteractive {
+                    startFileWatcher(sessionKey: event.sessionKey, transcriptPath: transcriptPath)
+                }
+            }
+
             if event.provider.capabilities.supportsUsageResumeTriggers {
                 handleClaudeUsageResumeTrigger(.sessionStart)
             }
@@ -131,6 +144,8 @@ final class NotchiStateMachine {
                 transcriptPath: transcriptPath
             )
 
+            applyParsedSessionEvents(result.events, for: sessionKey)
+
             if !result.messages.isEmpty {
                 sessionStore.recordAssistantMessages(result.messages, for: sessionKey)
             }
@@ -142,6 +157,30 @@ final class NotchiStateMachine {
             )
 
             pendingSyncTasks.removeValue(forKey: sessionKey)
+        }
+    }
+
+    func applyParsedSessionEvents(_ events: [ParsedSessionEvent], for sessionKey: ProviderSessionKey) {
+        guard !events.isEmpty,
+              let session = sessionStore.session(for: sessionKey) else { return }
+
+        for event in events {
+            _ = sessionStore.process(
+                HookEvent(
+                    provider: session.provider,
+                    rawSessionId: session.rawSessionId,
+                    transcriptPath: nil,
+                    cwd: session.cwd,
+                    event: event.event,
+                    status: event.status,
+                    tool: event.tool,
+                    toolInput: event.toolInput,
+                    toolUseId: event.toolUseId,
+                    userPrompt: nil,
+                    permissionMode: nil,
+                    interactive: session.isInteractive
+                )
+            )
         }
     }
 

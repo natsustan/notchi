@@ -134,6 +134,32 @@ final class ConversationParserTests: XCTestCase {
         XCTAssertFalse(result.interrupted)
     }
 
+    func testParseIncrementalReadsCodexExecCommandEventsFromExplicitTranscriptPath() async throws {
+        let sessionKey = ProviderSessionKey(provider: .codex, rawSessionId: "codex-\(UUID().uuidString)")
+        let transcriptPath = tempDirectoryURL
+            .appendingPathComponent("\(UUID().uuidString)-codex-tools.jsonl")
+            .path
+        let parser = ConversationParser.shared
+
+        let contents = """
+        {"timestamp":"2026-04-11T04:00:00.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\\"cmd\\":\\"pwd\\",\\"max_output_tokens\\":200}","call_id":"call-123"}}
+        {"timestamp":"2026-04-11T04:00:01.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-123","output":"Process exited with code 0\\nOutput:\\n/Users/ruban/Developer/GitHub/notchi\\n"}}
+        """
+        FileManager.default.createFile(atPath: transcriptPath, contents: Data((contents + "\n").utf8))
+
+        let result = await parser.parseIncremental(sessionKey: sessionKey, transcriptPath: transcriptPath)
+        await parser.resetState(for: sessionKey)
+
+        XCTAssertEqual(result.events.count, 2)
+        XCTAssertEqual(result.events.first?.event, .preToolUse)
+        XCTAssertEqual(result.events.first?.tool, "Bash")
+        XCTAssertEqual(result.events.first?.toolUseId, "call-123")
+        XCTAssertEqual(result.events.first?.toolInput?["command"]?.value as? String, "pwd")
+        XCTAssertEqual(result.events.last?.event, .postToolUse)
+        XCTAssertEqual(result.events.last?.status, "processing")
+        XCTAssertEqual(result.events.last?.toolUseId, "call-123")
+    }
+
     func testResolvedTranscriptPathReturnsNilForCodexWithoutTranscriptPath() {
         let path = ConversationParser.resolvedTranscriptPath(
             for: .codex,

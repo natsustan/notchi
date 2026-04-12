@@ -11,7 +11,7 @@ extension String {
     }
 }
 
-enum ToolStatus {
+enum ToolStatus: Equatable {
     case running
     case success
     case error

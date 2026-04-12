@@ -4,6 +4,27 @@ import Foundation
 struct ParseResult {
     let messages: [AssistantMessage]
     let interrupted: Bool
+    let events: [ParsedSessionEvent]
+
+    init(messages: [AssistantMessage], interrupted: Bool, events: [ParsedSessionEvent] = []) {
+        self.messages = messages
+        self.interrupted = interrupted
+        self.events = events
+    }
+}
+
+struct ParsedSessionEvent: Sendable {
+    let id: String
+    let event: NormalizedAgentEvent
+    let status: String
+    let tool: String?
+    let toolInput: [String: AnyCodable]?
+    let toolUseId: String?
+}
+
+private struct CodexToolCall: Sendable {
+    let tool: String
+    let input: [String: AnyCodable]?
 }
 
 actor ConversationParser {
@@ -13,8 +34,10 @@ actor ConversationParser {
 
     private var lastFileOffset: [String: UInt64] = [:]
     private var seenMessageIds: [String: Set<String>] = [:]
+    private var seenEventIds: [String: Set<String>] = [:]
+    private var codexToolCallsById: [String: [String: CodexToolCall]] = [:]
 
-    private static let emptyResult = ParseResult(messages: [], interrupted: false)
+    private static let emptyResult = ParseResult(messages: [], interrupted: false, events: [])
 
     nonisolated static func configureClaudeProjectsRootPath(using claudeConfig: ClaudeConfigDirectoryResolution) {
         claudeProjectsRootPath = claudeConfig.projectsDirectoryURL.path
@@ -67,6 +90,8 @@ actor ConversationParser {
         if fileSize < currentOffset {
             currentOffset = 0
             seenMessageIds[stateKey] = []
+            seenEventIds[stateKey] = []
+            codexToolCallsById[stateKey] = [:]
         }
 
         if fileSize == currentOffset {
@@ -85,8 +110,11 @@ actor ConversationParser {
         }
 
         var messages: [AssistantMessage] = []
+        var events: [ParsedSessionEvent] = []
         var interrupted = false
         var seen = seenMessageIds[stateKey] ?? []
+        var seenEvents = seenEventIds[stateKey] ?? []
+        var codexToolCalls = codexToolCallsById[stateKey] ?? [:]
         let lines = newContent.components(separatedBy: "\n")
 
         for line in lines where !line.isEmpty {
@@ -105,18 +133,31 @@ actor ConversationParser {
                 messages.append(message)
 
             case .codex:
-                guard let message = Self.parseCodexAssistantMessage(from: line) else { continue }
-                guard !seen.contains(message.id) else { continue }
+                guard let lineData = line.data(using: .utf8),
+                      let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any] else {
+                    continue
+                }
 
-                seen.insert(message.id)
-                messages.append(message)
+                if let message = Self.parseCodexAssistantMessage(from: json, originalLine: line),
+                   !seen.contains(message.id) {
+                    seen.insert(message.id)
+                    messages.append(message)
+                }
+
+                if let event = Self.parseCodexSessionEvent(from: json, toolCallsById: &codexToolCalls),
+                   !seenEvents.contains(event.id) {
+                    seenEvents.insert(event.id)
+                    events.append(event)
+                }
             }
         }
 
         lastFileOffset[stateKey] = fileSize
         seenMessageIds[stateKey] = seen
+        seenEventIds[stateKey] = seenEvents
+        codexToolCallsById[stateKey] = codexToolCalls
 
-        return ParseResult(messages: messages, interrupted: interrupted)
+        return ParseResult(messages: messages, interrupted: interrupted, events: events)
     }
 
     func parseIncremental(sessionId: String, transcriptPath: String) -> ParseResult {
@@ -130,6 +171,8 @@ actor ConversationParser {
         let stateKey = Self.stateKey(for: sessionKey)
         lastFileOffset.removeValue(forKey: stateKey)
         seenMessageIds.removeValue(forKey: stateKey)
+        seenEventIds.removeValue(forKey: stateKey)
+        codexToolCallsById.removeValue(forKey: stateKey)
     }
 
     func resetState(for sessionId: String) {
@@ -142,6 +185,8 @@ actor ConversationParser {
         guard let fileHandle = FileHandle(forReadingAtPath: transcriptPath) else {
             lastFileOffset[stateKey] = 0
             seenMessageIds[stateKey] = []
+            seenEventIds[stateKey] = []
+            codexToolCallsById[stateKey] = [:]
             return
         }
         defer { try? fileHandle.close() }
@@ -149,6 +194,8 @@ actor ConversationParser {
         let fileSize = (try? fileHandle.seekToEnd()) ?? 0
         lastFileOffset[stateKey] = fileSize
         seenMessageIds[stateKey] = []
+        seenEventIds[stateKey] = []
+        codexToolCallsById[stateKey] = [:]
     }
 
     func markCurrentPosition(sessionId: String, transcriptPath: String) {
@@ -187,10 +234,8 @@ actor ConversationParser {
         return AssistantMessage(id: uuid, text: fullText, timestamp: timestamp)
     }
 
-    private static func parseCodexAssistantMessage(from line: String) -> AssistantMessage? {
-        guard let lineData = line.data(using: .utf8),
-              let json = try? JSONSerialization.jsonObject(with: lineData) as? [String: Any],
-              let type = json["type"] as? String,
+    private static func parseCodexAssistantMessage(from json: [String: Any], originalLine: String) -> AssistantMessage? {
+        guard let type = json["type"] as? String,
               type == "response_item",
               let payload = json["payload"] as? [String: Any],
               payload["type"] as? String == "message",
@@ -216,8 +261,89 @@ actor ConversationParser {
             .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !fullText.isEmpty else { return nil }
 
-        let identifier = "\(phase)-\(timestampString ?? "unknown")-\(stableContentDigest(for: line))"
+        let identifier = "\(phase)-\(timestampString ?? "unknown")-\(stableContentDigest(for: originalLine))"
         return AssistantMessage(id: identifier, text: fullText, timestamp: timestamp)
+    }
+
+    private static func parseCodexSessionEvent(
+        from json: [String: Any],
+        toolCallsById: inout [String: CodexToolCall]
+    ) -> ParsedSessionEvent? {
+        guard let type = json["type"] as? String,
+              type == "response_item",
+              let payload = json["payload"] as? [String: Any],
+              let payloadType = payload["type"] as? String else {
+            return nil
+        }
+
+        switch payloadType {
+        case "function_call":
+            guard let callID = payload["call_id"] as? String,
+                  let toolCall = parseCodexToolCall(from: payload) else {
+                return nil
+            }
+
+            toolCallsById[callID] = toolCall
+            return ParsedSessionEvent(
+                id: "tool-start-\(callID)",
+                event: .preToolUse,
+                status: "running_tool",
+                tool: toolCall.tool,
+                toolInput: toolCall.input,
+                toolUseId: callID
+            )
+
+        case "function_call_output":
+            guard let callID = payload["call_id"] as? String,
+                  let toolCall = toolCallsById.removeValue(forKey: callID) else {
+                return nil
+            }
+
+            let output = payload["output"] as? String ?? ""
+            return ParsedSessionEvent(
+                id: "tool-end-\(callID)",
+                event: .postToolUse,
+                status: isSuccessfulCodexToolOutput(output) ? "processing" : "error",
+                tool: toolCall.tool,
+                toolInput: nil,
+                toolUseId: callID
+            )
+
+        default:
+            return nil
+        }
+    }
+
+    private static func parseCodexToolCall(from payload: [String: Any]) -> CodexToolCall? {
+        guard let name = payload["name"] as? String else { return nil }
+
+        switch name {
+        case "exec_command":
+            let command = parseCodexExecCommand(from: payload["arguments"] as? String)
+            let input = command.map { ["command": AnyCodable($0)] }
+            return CodexToolCall(tool: "Bash", input: input)
+
+        default:
+            return nil
+        }
+    }
+
+    private static func parseCodexExecCommand(from arguments: String?) -> String? {
+        guard let arguments,
+              let data = arguments.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        return json["cmd"] as? String
+    }
+
+    private static func isSuccessfulCodexToolOutput(_ output: String) -> Bool {
+        if let match = output.firstMatch(of: /Process exited with code (\d+)/) {
+            return match.1 == "0"
+        }
+
+        return !output.contains("Process exited with signal")
     }
 
     private static func extractClaudeText(from messageDict: [String: Any]) -> String {
