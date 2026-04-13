@@ -11,12 +11,15 @@ typealias AgentHookEnvelopeHandler = @Sendable (AgentHookEnvelope) -> Void
 nonisolated final class SocketServer: @unchecked Sendable {
     static let socketPath = "/tmp/notchi.sock"
     static let shared = SocketServer(socketPath: socketPath, clientReadTimeout: 0.5)
+    private static let startRetryDelay: DispatchTimeInterval = .milliseconds(250)
+    private static let maxStartRetryAttempts = 8
 
     private let socketPath: String
     private let clientReadTimeout: TimeInterval
     private var serverSocket: Int32 = -1
     private var acceptSource: DispatchSourceRead?
     private var eventHandler: AgentHookEnvelopeHandler?
+    private var pendingStartRetry: DispatchWorkItem?
     private let serverQueue = DispatchQueue(label: "com.ruban.notchi.socket.server", qos: .userInitiated)
     private let clientQueue = DispatchQueue(label: "com.ruban.notchi.socket.client", qos: .userInitiated, attributes: .concurrent)
 
@@ -27,18 +30,31 @@ nonisolated final class SocketServer: @unchecked Sendable {
 
     func start(onEvent: @escaping AgentHookEnvelopeHandler) {
         serverQueue.async { [weak self] in
-            self?.startServer(onEvent: onEvent)
+            self?.startServer(
+                onEvent: onEvent,
+                retryAttemptsRemaining: Self.maxStartRetryAttempts
+            )
         }
     }
 
-    private func startServer(onEvent: @escaping AgentHookEnvelopeHandler) {
+    private func startServer(
+        onEvent: @escaping AgentHookEnvelopeHandler,
+        retryAttemptsRemaining: Int
+    ) {
         guard serverSocket < 0 else { return }
 
         switch prepareSocketPathForBinding() {
         case .ready:
+            // WHY: a previous retry may already be queued when the old listener
+            // finally disappears; cancel it once we successfully own the path.
+            pendingStartRetry?.cancel()
+            pendingStartRetry = nil
             break
         case .alreadyActive:
-            logger.warning("Socket listener already active at \(self.socketPath, privacy: .public); skipping duplicate startup")
+            scheduleStartRetry(
+                onEvent: onEvent,
+                retryAttemptsRemaining: retryAttemptsRemaining
+            )
             return
         case .failed(let errorCode):
             logger.error("Failed to prepare socket path: \(errorCode)")
@@ -168,6 +184,9 @@ nonisolated final class SocketServer: @unchecked Sendable {
     }
 
     private func stopServer() {
+        pendingStartRetry?.cancel()
+        pendingStartRetry = nil
+
         if let acceptSource {
             acceptSource.cancel()
             self.acceptSource = nil
@@ -304,6 +323,35 @@ nonisolated final class SocketServer: @unchecked Sendable {
         let clampedTimeout = max(timeout, 0)
         let milliseconds = Int((clampedTimeout * 1000).rounded(.up))
         return Int32(min(milliseconds, Int(Int32.max)))
+    }
+
+    private func scheduleStartRetry(
+        onEvent: @escaping AgentHookEnvelopeHandler,
+        retryAttemptsRemaining: Int
+    ) {
+        guard retryAttemptsRemaining > 0 else {
+            logger.error(
+                "Socket listener remained busy at \(self.socketPath, privacy: .public); giving up after retries"
+            )
+            return
+        }
+
+        logger.warning(
+            "Socket listener already active at \(self.socketPath, privacy: .public); retrying startup (\(retryAttemptsRemaining - 1) attempts left)"
+        )
+
+        pendingStartRetry?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.startServer(
+                onEvent: onEvent,
+                retryAttemptsRemaining: retryAttemptsRemaining - 1
+            )
+        }
+        pendingStartRetry = workItem
+        serverQueue.asyncAfter(
+            deadline: .now() + Self.startRetryDelay,
+            execute: workItem
+        )
     }
 
     private func logEvent(_ event: AgentHookEnvelope) {

@@ -154,6 +154,55 @@ final class SocketServerTests: XCTestCase {
         XCTAssertTrue(duplicateSnapshot.isEmpty, "Duplicate server should not steal the socket path")
     }
 
+    func testDuplicateServerRetriesAndTakesOverAfterOriginalStops() async throws {
+        let firstRecorder = EventRecorder()
+        let secondRecorder = EventRecorder()
+        let probeSessionId = "probe-\(UUID().uuidString)"
+        let handoffSessionId = "handoff-\(UUID().uuidString)"
+        let path = uniqueSocketPath()
+        let (firstServer, listeningPath) = try await makeServer(
+            at: path,
+            clientReadTimeout: 0.5,
+            recorder: firstRecorder
+        )
+
+        let duplicateServer = SocketServer(socketPath: listeningPath, clientReadTimeout: 0.5)
+        activeServers.append((duplicateServer, listeningPath))
+        duplicateServer.start { event in
+            Task {
+                await secondRecorder.record(event)
+            }
+        }
+
+        firstServer.stop()
+
+        let replacementAcceptedProbe = await waitUntil(timeout: 3) { [self] in
+            guard let client = try? UnixSocketClient(path: listeningPath),
+                  let payload = try? makeEventPayload(sessionId: probeSessionId) else {
+                return false
+            }
+            defer { client.closeConnection() }
+
+            do {
+                try client.send(payload)
+                return await secondRecorder.snapshot().contains { $0.sessionId == probeSessionId }
+            } catch {
+                return false
+            }
+        }
+
+        XCTAssertTrue(replacementAcceptedProbe, "Duplicate server should take over after the original listener stops")
+
+        let handoffClient = try UnixSocketClient(path: listeningPath)
+        try handoffClient.send(makeEventPayload(sessionId: handoffSessionId))
+        handoffClient.closeConnection()
+
+        let replacementReceivedEvent = await waitUntil(timeout: 1) {
+            await secondRecorder.snapshot().contains { $0.sessionId == handoffSessionId }
+        }
+        XCTAssertTrue(replacementReceivedEvent)
+    }
+
     func testSocketUsesUserOnlyPermissions() async throws {
         let recorder = EventRecorder()
         let (_, path) = try await makeServer(clientReadTimeout: 0.5, recorder: recorder)

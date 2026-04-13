@@ -148,6 +148,54 @@ final class NotchiStateMachineTests: XCTestCase {
         XCTAssertTrue(receivedTriggers.isEmpty)
     }
 
+    func testCodexSessionStartDoesNotCreateVisibleSession() {
+        let stateMachine = NotchiStateMachine.shared
+        let sessionId = "codex-start-\(UUID().uuidString)"
+
+        // Intentionally omit transcriptPath so this covers the blank-session
+        // case without starting a watcher as a side effect.
+        stateMachine.handleEvent(makeEvent(
+            sessionId: sessionId,
+            provider: .codex,
+            event: .sessionStarted,
+            status: "processing"
+        ))
+
+        let sessionKey = ProviderSessionKey(provider: .codex, rawSessionId: sessionId)
+        XCTAssertNil(SessionStore.shared.session(for: sessionKey))
+        XCTAssertEqual(SessionStore.shared.activeSessionCount, 0)
+    }
+
+    func testCodexVisibleSessionPreservesOriginalSessionStartTime() async throws {
+        let stateMachine = NotchiStateMachine.shared
+        let sessionId = "codex-visible-start-\(UUID().uuidString)"
+        let sessionKey = ProviderSessionKey(provider: .codex, rawSessionId: sessionId)
+
+        stateMachine.handleEvent(makeEvent(
+            sessionId: sessionId,
+            provider: .codex,
+            event: .sessionStarted,
+            status: "processing"
+        ))
+
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        stateMachine.handleEvent(makeEvent(
+            sessionId: sessionId,
+            provider: .codex,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "hello"
+        ))
+
+        guard let session = SessionStore.shared.session(for: sessionKey),
+              let promptSubmitTime = session.promptSubmitTime else {
+            return XCTFail("Expected visible Codex session after first real event")
+        }
+
+        XCTAssertGreaterThanOrEqual(promptSubmitTime.timeIntervalSince(session.sessionStartTime), 0.15)
+    }
+
     func testApplyingParsedCodexSessionEventsRecordsBashActivity() {
         let stateMachine = NotchiStateMachine.shared
         let session = SessionStore.shared.process(makeEvent(

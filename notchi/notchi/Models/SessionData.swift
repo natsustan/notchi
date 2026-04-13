@@ -79,15 +79,21 @@ final class SessionData: Identifiable {
     private static let yOffsetBase: CGFloat = -5.0
     private static let yOffsetRange: UInt = 51
 
-    init(sessionKey: ProviderSessionKey, cwd: String, isInteractive: Bool = true, existingXPositions: [CGFloat] = []) {
+    init(
+        sessionKey: ProviderSessionKey,
+        cwd: String,
+        isInteractive: Bool = true,
+        existingXPositions: [CGFloat] = [],
+        sessionStartTime: Date = Date()
+    ) {
         self.id = sessionKey.stableId
         self.provider = sessionKey.provider
         self.rawSessionId = sessionKey.rawSessionId
         self.sessionKey = sessionKey
         self.cwd = cwd
         self.isInteractive = isInteractive
-        self.sessionStartTime = Date()
-        self.lastActivity = Date()
+        self.sessionStartTime = sessionStartTime
+        self.lastActivity = sessionStartTime
 
         let hash = UInt(bitPattern: sessionKey.stableId.hashValue)
         self.spriteXPosition = Self.resolveXPosition(hash: hash, existingPositions: existingXPositions)
@@ -101,13 +107,15 @@ final class SessionData: Identifiable {
         provider: AgentProvider = .claude,
         cwd: String,
         isInteractive: Bool = true,
-        existingXPositions: [CGFloat] = []
+        existingXPositions: [CGFloat] = [],
+        sessionStartTime: Date = Date()
     ) {
         self.init(
             sessionKey: ProviderSessionKey(provider: provider, rawSessionId: sessionId),
             cwd: cwd,
             isInteractive: isInteractive,
-            existingXPositions: existingXPositions
+            existingXPositions: existingXPositions,
+            sessionStartTime: sessionStartTime
         )
     }
 

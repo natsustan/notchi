@@ -62,6 +62,44 @@ final class AgentProviderAdapterTests: XCTestCase {
         XCTAssertNil(CodexProviderAdapter().normalize(envelope))
     }
 
+    func testCodexAdapterDropsInternalDesktopTitleGeneratorSession() throws {
+        let sessionId = "codex-internal-\(UUID().uuidString)"
+        let adapter = CodexProviderAdapter()
+        addTeardownBlock {
+            CodexProviderAdapter.resetInternalSessionTrackingForTests()
+        }
+
+        let promptData = try JSONSerialization.data(withJSONObject: [
+            "provider": "codex",
+            "session_id": sessionId,
+            "cwd": "/tmp",
+            "event": "UserPromptSubmit",
+            "status": "processing",
+            "transcript_path": NSNull(),
+            "permission_mode": "bypassPermissions",
+            "user_prompt": """
+            You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title for a task that will be created from that prompt.
+
+            User prompt:
+            hello!
+            """,
+        ])
+        let promptEnvelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: promptData)
+        XCTAssertNil(adapter.normalize(promptEnvelope))
+
+        let stopData = try JSONSerialization.data(withJSONObject: [
+            "provider": "codex",
+            "session_id": sessionId,
+            "cwd": "/tmp",
+            "event": "Stop",
+            "status": "waiting_for_input",
+            "transcript_path": NSNull(),
+            "permission_mode": "bypassPermissions",
+        ])
+        let stopEnvelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: stopData)
+        XCTAssertNil(adapter.normalize(stopEnvelope))
+    }
+
     func testClaudeAdapterDropsUnknownEnvelope() throws {
         let data = try JSONSerialization.data(withJSONObject: [
             "session_id": "claude-session",

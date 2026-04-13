@@ -13,6 +13,7 @@ final class NotchiStateMachine {
     private var emotionDecayTimer: Task<Void, Never>?
     private var pendingSyncTasks: [ProviderSessionKey: Task<Void, Never>] = [:]
     private var pendingPositionMarks: [ProviderSessionKey: Task<Void, Never>] = [:]
+    private var pendingCodexSessionStartTimes: [ProviderSessionKey: Date] = [:]
     private var fileWatchers: [ProviderSessionKey: (source: DispatchSourceFileSystemObject, fd: Int32)] = [:]
     var handleClaudeUsageResumeTrigger: (ClaudeUsageResumeTrigger) -> Void = { trigger in
         ClaudeUsageService.shared.handleClaudeResumeTrigger(trigger)
@@ -30,14 +31,32 @@ final class NotchiStateMachine {
     }
 
     func handleEvent(_ event: HookEvent) {
-        let session = sessionStore.process(event)
-        let isDone = event.status == "waiting_for_input"
         let transcriptPath = ConversationParser.resolvedTranscriptPath(
             for: event.provider,
             sessionId: event.rawSessionId,
             cwd: event.cwd,
             transcriptPath: event.transcriptPath
         )
+        let isDone = event.status == "waiting_for_input"
+
+        // WHY: Codex emits SessionStart before there is any user-visible content for a
+        // brand new chat. Start watching immediately, but don't surface a blank session
+        // until later events give us real prompt/reply/tool content.
+        if event.provider == .codex,
+           event.event == .sessionStarted,
+           sessionStore.session(for: event.sessionKey) == nil {
+            pendingCodexSessionStartTimes[event.sessionKey] = Date()
+            refreshCodexSessionStartTracking(
+                sessionKey: event.sessionKey,
+                transcriptPath: transcriptPath,
+                isInteractive: event.interactive ?? true
+            )
+
+            return
+        }
+
+        let sessionStartTimeOverride = pendingSessionStartTimeOverride(for: event)
+        let session = sessionStore.process(event, sessionStartTimeOverride: sessionStartTimeOverride)
 
         switch event.event {
         case .userPromptSubmitted:
@@ -87,17 +106,15 @@ final class NotchiStateMachine {
             }
 
         case .sessionStarted:
-            if event.provider == .codex, let transcriptPath {
-                pendingPositionMarks[event.sessionKey] = Task {
-                    await ConversationParser.shared.markCurrentPosition(
-                        sessionKey: event.sessionKey,
-                        transcriptPath: transcriptPath
-                    )
-                }
-
-                if session.isInteractive {
-                    startFileWatcher(sessionKey: event.sessionKey, transcriptPath: transcriptPath)
-                }
+            if event.provider == .codex {
+                // WHY: Existing Codex sessions can emit SessionStart on resume,
+                // and we still want to refresh the parser baseline/watcher even
+                // though the visible session already exists.
+                refreshCodexSessionStartTracking(
+                    sessionKey: event.sessionKey,
+                    transcriptPath: transcriptPath,
+                    isInteractive: session.isInteractive
+                )
             }
 
             if event.provider.capabilities.supportsUsageResumeTriggers {
@@ -112,6 +129,7 @@ final class NotchiStateMachine {
             }
 
         case .sessionEnded:
+            pendingCodexSessionStartTimes.removeValue(forKey: event.sessionKey)
             stopFileWatcher(sessionKey: event.sessionKey)
             pendingSyncTasks.removeValue(forKey: event.sessionKey)?.cancel()
             pendingPositionMarks.removeValue(forKey: event.sessionKey)?.cancel()
@@ -158,6 +176,34 @@ final class NotchiStateMachine {
 
             pendingSyncTasks.removeValue(forKey: sessionKey)
         }
+    }
+
+    private func refreshCodexSessionStartTracking(
+        sessionKey: ProviderSessionKey,
+        transcriptPath: String?,
+        isInteractive: Bool
+    ) {
+        guard let transcriptPath else { return }
+
+        pendingPositionMarks[sessionKey] = Task {
+            await ConversationParser.shared.markCurrentPosition(
+                sessionKey: sessionKey,
+                transcriptPath: transcriptPath
+            )
+        }
+
+        if isInteractive {
+            startFileWatcher(sessionKey: sessionKey, transcriptPath: transcriptPath)
+        }
+    }
+
+    private func pendingSessionStartTimeOverride(for event: HookEvent) -> Date? {
+        guard event.provider == .codex,
+              sessionStore.session(for: event.sessionKey) == nil else {
+            return nil
+        }
+
+        return pendingCodexSessionStartTimes.removeValue(forKey: event.sessionKey)
     }
 
     func applyParsedSessionEvents(_ events: [ParsedSessionEvent], for sessionKey: ProviderSessionKey) {

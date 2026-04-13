@@ -66,9 +66,14 @@ final class SessionStore {
         logger.info("Selected session: nil")
     }
 
-    func process(_ event: HookEvent) -> SessionData {
+    func process(_ event: HookEvent, sessionStartTimeOverride: Date? = nil) -> SessionData {
         let isInteractive = event.interactive ?? true
-        let session = getOrCreateSession(sessionKey: event.sessionKey, cwd: event.cwd, isInteractive: isInteractive)
+        let session = getOrCreateSession(
+            sessionKey: event.sessionKey,
+            cwd: event.cwd,
+            isInteractive: isInteractive,
+            sessionStartTime: sessionStartTimeOverride
+        )
         let isProcessing = Self.isProcessingStatus(event.status)
         session.updateProcessingState(isProcessing: isProcessing)
 
@@ -149,7 +154,12 @@ final class SessionStore {
         return label
     }
 
-    private func getOrCreateSession(sessionKey: ProviderSessionKey, cwd: String, isInteractive: Bool) -> SessionData {
+    private func getOrCreateSession(
+        sessionKey: ProviderSessionKey,
+        cwd: String,
+        isInteractive: Bool,
+        sessionStartTime: Date?
+    ) -> SessionData {
         if let existing = sessions[sessionKey] {
             return existing
         }
@@ -159,7 +169,8 @@ final class SessionStore {
             sessionKey: sessionKey,
             cwd: cwd,
             isInteractive: isInteractive,
-            existingXPositions: existingXPositions
+            existingXPositions: existingXPositions,
+            sessionStartTime: sessionStartTime ?? Date()
         )
         sessions[sessionKey] = session
         recomputeDisplaySessionNumbers()

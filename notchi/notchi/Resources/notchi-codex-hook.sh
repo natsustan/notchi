@@ -29,6 +29,7 @@ output = {
     'cwd': input_data.get('cwd', ''),
     'event': hook_event,
     'status': status_map.get(hook_event, input_data.get('status', 'unknown')),
+    'permission_mode': input_data.get('permission_mode'),
     'interactive': True,
 }
 
