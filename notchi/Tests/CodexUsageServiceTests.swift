@@ -39,7 +39,7 @@ final class CodexUsageServiceTests: XCTestCase {
 
     func testRefreshMarksOldButUnexpiredUsageAsStaleWithoutStatusMessage() async {
         let observedAt = Date(timeIntervalSince1970: 1_000)
-        let now = Date(timeIntervalSince1970: 1_130)
+        let now = Date(timeIntervalSince1970: 1_930)
         let service = CodexUsageService(dependencies: CodexUsageServiceDependencies(
             resolveUsage: { _ in
                 CodexUsageSnapshot(

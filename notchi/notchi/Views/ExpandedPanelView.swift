@@ -119,6 +119,7 @@ struct ExpandedPanelView: View {
     @Binding var showingSettings: Bool
     @Binding var showingSessionActivity: Bool
     @Binding var isActivityCollapsed: Bool
+    @Binding var hoveredSessionId: String?
 
     init(
         sessionStore: SessionStore,
@@ -126,7 +127,8 @@ struct ExpandedPanelView: View {
         codexUsageService: CodexUsageService,
         showingSettings: Binding<Bool>,
         showingSessionActivity: Binding<Bool>,
-        isActivityCollapsed: Binding<Bool>
+        isActivityCollapsed: Binding<Bool>,
+        hoveredSessionId: Binding<String?>
     ) {
         self.sessionStore = sessionStore
         self.usageService = usageService
@@ -134,10 +136,20 @@ struct ExpandedPanelView: View {
         _showingSettings = showingSettings
         _showingSessionActivity = showingSessionActivity
         _isActivityCollapsed = isActivityCollapsed
+        _hoveredSessionId = hoveredSessionId
     }
 
     private var effectiveSession: SessionData? {
         sessionStore.effectiveSession
+    }
+
+    private var hoveredSession: SessionData? {
+        guard let hoveredSessionId else { return nil }
+        return sessionStore.sortedSessions.first { $0.id == hoveredSessionId }
+    }
+
+    private var usageContextSession: SessionData? {
+        hoveredSession ?? effectiveSession
     }
 
     private var state: NotchiState {
@@ -172,13 +184,6 @@ struct ExpandedPanelView: View {
         sessionStore.activeSessionCount >= 2 && !showingSessionActivity
     }
 
-    private var shouldShowSharedUsageBar: Bool {
-        Self.shouldShowSharedUsageBar(
-            effectiveSession: effectiveSession,
-            activeSessions: sessionStore.sortedSessions
-        )
-    }
-
     private var sharedUsageResetLabelPrefix: String? {
         Self.sharedUsageResetLabelPrefix(
             state: sharedUsageBarState,
@@ -189,7 +194,7 @@ struct ExpandedPanelView: View {
     private var sharedUsageBarState: SharedUsageBarState? {
         let activeSessions = sessionStore.sortedSessions
         guard Self.shouldShowSharedUsageBar(
-            effectiveSession: effectiveSession,
+            contextSession: usageContextSession,
             activeSessions: activeSessions
         ) else {
             return nil
@@ -223,7 +228,7 @@ struct ExpandedPanelView: View {
         ) : nil
 
         return Self.sharedUsageBarState(
-            effectiveSession: effectiveSession,
+            contextSession: usageContextSession,
             claude: claude,
             codex: codex
         )
@@ -319,6 +324,7 @@ struct ExpandedPanelView: View {
                             sessionStore.displayTitle(for: session)
                         },
                         selectedSessionId: sessionStore.selectedSessionId,
+                        hoveredSessionId: $hoveredSessionId,
                         onSelectSession: { sessionId in
                             sessionStore.selectSession(matchingStableId: sessionId)
                             showingSessionActivity = true
@@ -395,8 +401,8 @@ struct ExpandedPanelView: View {
         }
     }
 
-    static func shouldShowSharedUsageBar(effectiveSession: SessionData?, activeSessions: [SessionData]) -> Bool {
-        !activeSessions.isEmpty || effectiveSession == nil
+    static func shouldShowSharedUsageBar(contextSession: SessionData?, activeSessions: [SessionData]) -> Bool {
+        !activeSessions.isEmpty || contextSession == nil
     }
 
     static func hasMixedClaudeAndCodexSessions(_ activeSessions: [SessionData]) -> Bool {
@@ -422,7 +428,7 @@ struct ExpandedPanelView: View {
     }
 
     static func sharedUsageBarState(
-        effectiveSession: SessionData?,
+        contextSession: SessionData?,
         claude: SharedUsageBarState?,
         codex: SharedUsageBarState?
     ) -> SharedUsageBarState? {
@@ -430,8 +436,8 @@ struct ExpandedPanelView: View {
             return claude ?? codex
         }
 
-        if let effectiveSession {
-            switch effectiveSession.provider {
+        if let contextSession {
+            switch contextSession.provider {
             case .claude:
                 return claude
             case .codex:

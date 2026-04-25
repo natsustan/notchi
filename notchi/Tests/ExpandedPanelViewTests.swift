@@ -9,7 +9,7 @@ final class ExpandedPanelViewTests: XCTestCase {
 
         XCTAssertTrue(
             ExpandedPanelView.shouldShowSharedUsageBar(
-                effectiveSession: codex,
+                contextSession: codex,
                 activeSessions: [codex, claude]
             )
         )
@@ -20,7 +20,7 @@ final class ExpandedPanelViewTests: XCTestCase {
 
         XCTAssertTrue(
             ExpandedPanelView.shouldShowSharedUsageBar(
-                effectiveSession: codex,
+                contextSession: codex,
                 activeSessions: [codex]
             )
         )
@@ -29,7 +29,7 @@ final class ExpandedPanelViewTests: XCTestCase {
     func testSharedUsageBarStaysVisibleWhenNoEffectiveSessionExistsYet() {
         XCTAssertTrue(
             ExpandedPanelView.shouldShowSharedUsageBar(
-                effectiveSession: nil,
+                contextSession: nil,
                 activeSessions: []
             )
         )
@@ -41,7 +41,7 @@ final class ExpandedPanelViewTests: XCTestCase {
         let codex = makeUsageState(provider: .codex, usage: 11, observedAt: Date(timeIntervalSince1970: 100))
 
         let state = ExpandedPanelView.sharedUsageBarState(
-            effectiveSession: codexSession,
+            contextSession: codexSession,
             claude: claude,
             codex: codex
         )
@@ -56,7 +56,7 @@ final class ExpandedPanelViewTests: XCTestCase {
         let codex = makeUsageState(provider: .codex, usage: 11, observedAt: Date(timeIntervalSince1970: 200))
 
         let state = ExpandedPanelView.sharedUsageBarState(
-            effectiveSession: claudeSession,
+            contextSession: claudeSession,
             claude: claude,
             codex: codex
         )
@@ -70,7 +70,22 @@ final class ExpandedPanelViewTests: XCTestCase {
         let codex = makeUsageState(provider: .codex, usage: 11, observedAt: Date(timeIntervalSince1970: 200))
 
         let state = ExpandedPanelView.sharedUsageBarState(
-            effectiveSession: nil,
+            contextSession: nil,
+            claude: claude,
+            codex: codex
+        )
+
+        XCTAssertEqual(state?.provider, .codex)
+        XCTAssertEqual(state?.usage?.usagePercentage, 11)
+    }
+
+    func testHoveredSessionProviderDrivesUsageState() {
+        let hoveredCodexSession = SessionData(sessionId: "hovered-codex-session", provider: .codex, cwd: "/tmp/project")
+        let claude = makeUsageState(provider: .claude, usage: 42, observedAt: Date(timeIntervalSince1970: 200))
+        let codex = makeUsageState(provider: .codex, usage: 11, observedAt: Date(timeIntervalSince1970: 100))
+
+        let state = ExpandedPanelView.sharedUsageBarState(
+            contextSession: hoveredCodexSession,
             claude: claude,
             codex: codex
         )

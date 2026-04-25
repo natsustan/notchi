@@ -27,7 +27,7 @@ final class CodexUsageService {
     var statusMessage: String?
     var lastObservedAt: Date?
 
-    private static let staleObservationInterval: TimeInterval = 120
+    private static let staleObservationInterval: TimeInterval = 15 * 60
 
     private let dependencies: CodexUsageServiceDependencies
 

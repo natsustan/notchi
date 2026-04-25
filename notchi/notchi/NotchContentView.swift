@@ -297,7 +297,8 @@ struct NotchContentView: View {
                         codexUsageService: CodexUsageService.shared,
                         showingSettings: $showingPanelSettings,
                         showingSessionActivity: $showingSessionActivity,
-                        isActivityCollapsed: $isActivityCollapsed
+                        isActivityCollapsed: $isActivityCollapsed,
+                        hoveredSessionId: $hoveredSessionId
                     )
                     .frame(
                         width: NotchConstants.expandedPanelSize.width - 48,
