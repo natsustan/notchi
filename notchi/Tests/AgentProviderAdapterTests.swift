@@ -37,6 +37,7 @@ final class AgentProviderAdapterTests: XCTestCase {
             "cwd": "/tmp",
             "event": "UserPromptSubmit",
             "status": "processing",
+            "transcript_path": "/tmp/codex-rollout.jsonl",
             "user_prompt": "hello",
         ])
         let envelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: data)
@@ -62,11 +63,11 @@ final class AgentProviderAdapterTests: XCTestCase {
         XCTAssertNil(CodexProviderAdapter().normalize(envelope))
     }
 
-    func testCodexAdapterDropsInternalDesktopTitleGeneratorSession() throws {
-        let sessionId = "codex-internal-\(UUID().uuidString)"
+    func testCodexAdapterDropsCodexSessionWithoutTranscriptPath() throws {
+        let sessionId = "codex-untrackable-\(UUID().uuidString)"
         let adapter = CodexProviderAdapter()
         addTeardownBlock {
-            CodexProviderAdapter.resetInternalSessionTrackingForTests()
+            CodexProviderAdapter.resetTranscriptBackedSessionTrackingForTests()
         }
 
         let promptData = try JSONSerialization.data(withJSONObject: [
@@ -77,12 +78,7 @@ final class AgentProviderAdapterTests: XCTestCase {
             "status": "processing",
             "transcript_path": NSNull(),
             "permission_mode": "bypassPermissions",
-            "user_prompt": """
-            You are a helpful assistant. You will be presented with a user prompt, and your job is to provide a short title for a task that will be created from that prompt.
-
-            User prompt:
-            hello!
-            """,
+            "user_prompt": "internal prompt text should not matter",
         ])
         let promptEnvelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: promptData)
         XCTAssertNil(adapter.normalize(promptEnvelope))
@@ -98,6 +94,80 @@ final class AgentProviderAdapterTests: XCTestCase {
         ])
         let stopEnvelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: stopData)
         XCTAssertNil(adapter.normalize(stopEnvelope))
+    }
+
+    func testCodexAdapterAllowsTranscriptBackedSessionAndLaterStopWithoutTranscriptPath() throws {
+        let sessionId = "codex-trackable-\(UUID().uuidString)"
+        let adapter = CodexProviderAdapter()
+        addTeardownBlock {
+            CodexProviderAdapter.resetTranscriptBackedSessionTrackingForTests()
+        }
+
+        let promptData = try JSONSerialization.data(withJSONObject: [
+            "provider": "codex",
+            "session_id": sessionId,
+            "cwd": "/tmp",
+            "event": "UserPromptSubmit",
+            "status": "processing",
+            "transcript_path": "/tmp/codex-rollout.jsonl",
+            "user_prompt": "hello",
+        ])
+        let promptEnvelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: promptData)
+        XCTAssertEqual(adapter.normalize(promptEnvelope)?.event, .userPromptSubmitted)
+
+        let stopData = try JSONSerialization.data(withJSONObject: [
+            "provider": "codex",
+            "session_id": sessionId,
+            "cwd": "/tmp",
+            "event": "Stop",
+            "status": "waiting_for_input",
+            "transcript_path": NSNull(),
+        ])
+        let stopEnvelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: stopData)
+        XCTAssertEqual(adapter.normalize(stopEnvelope)?.event, .stop)
+    }
+
+    func testCodexAdapterClearsTrackingOnStopWithTranscriptPath() throws {
+        let sessionId = "codex-trackable-\(UUID().uuidString)"
+        let adapter = CodexProviderAdapter()
+        addTeardownBlock {
+            CodexProviderAdapter.resetTranscriptBackedSessionTrackingForTests()
+        }
+
+        let promptData = try JSONSerialization.data(withJSONObject: [
+            "provider": "codex",
+            "session_id": sessionId,
+            "cwd": "/tmp",
+            "event": "UserPromptSubmit",
+            "status": "processing",
+            "transcript_path": "/tmp/codex-rollout.jsonl",
+            "user_prompt": "hello",
+        ])
+        let promptEnvelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: promptData)
+        XCTAssertEqual(adapter.normalize(promptEnvelope)?.event, .userPromptSubmitted)
+
+        let stopData = try JSONSerialization.data(withJSONObject: [
+            "provider": "codex",
+            "session_id": sessionId,
+            "cwd": "/tmp",
+            "event": "Stop",
+            "status": "waiting_for_input",
+            "transcript_path": "/tmp/codex-rollout.jsonl",
+        ])
+        let stopEnvelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: stopData)
+        XCTAssertEqual(adapter.normalize(stopEnvelope)?.event, .stop)
+
+        let strayData = try JSONSerialization.data(withJSONObject: [
+            "provider": "codex",
+            "session_id": sessionId,
+            "cwd": "/tmp",
+            "event": "UserPromptSubmit",
+            "status": "processing",
+            "transcript_path": NSNull(),
+            "user_prompt": "stray",
+        ])
+        let strayEnvelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: strayData)
+        XCTAssertNil(adapter.normalize(strayEnvelope))
     }
 
     func testClaudeAdapterDropsUnknownEnvelope() throws {
