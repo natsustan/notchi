@@ -3,6 +3,15 @@ import Foundation
 enum SpinnerVerbs {
     static let defaultVerb = "Clanking"
 
+    static func providerVerb(for provider: AgentProvider) -> String {
+        switch provider {
+        case .claude:
+            "Clauding"
+        case .codex:
+            "Codexing"
+        }
+    }
+
     static let all = [
         "Accomplishing",
         "Actioning",
@@ -33,7 +42,6 @@ enum SpinnerVerbs {
         "Choreographing",
         "Churning",
         "Clanking",
-        "Clauding",
         "Coalescing",
         "Cogitating",
         "Combobulating",

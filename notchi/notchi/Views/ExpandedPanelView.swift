@@ -96,15 +96,106 @@ enum ActivityItem: Identifiable {
     }
 }
 
+nonisolated struct SharedUsageBarState {
+    let provider: AgentProvider
+    let usage: QuotaPeriod?
+    let isUsingExtraUsage: Bool
+    let isLoading: Bool
+    let error: String?
+    let statusMessage: String?
+    let isStale: Bool
+    let recoveryAction: ClaudeUsageRecoveryAction
+    let lastObservedAt: Date?
+    let labelOverride: String?
+    let isProviderSpecific: Bool
+
+    init(
+        provider: AgentProvider,
+        usage: QuotaPeriod?,
+        isUsingExtraUsage: Bool,
+        isLoading: Bool,
+        error: String?,
+        statusMessage: String?,
+        isStale: Bool,
+        recoveryAction: ClaudeUsageRecoveryAction,
+        lastObservedAt: Date?,
+        labelOverride: String? = nil,
+        isProviderSpecific: Bool = true
+    ) {
+        self.provider = provider
+        self.usage = usage
+        self.isUsingExtraUsage = isUsingExtraUsage
+        self.isLoading = isLoading
+        self.error = error
+        self.statusMessage = statusMessage
+        self.isStale = isStale
+        self.recoveryAction = recoveryAction
+        self.lastObservedAt = lastObservedAt
+        self.labelOverride = labelOverride
+        self.isProviderSpecific = isProviderSpecific
+    }
+
+    var label: String {
+        if let labelOverride {
+            return labelOverride
+        }
+        return "\(provider.displayName) Usage"
+    }
+
+    static let noActiveSession = SharedUsageBarState(
+        // Provider is a placeholder; isProviderSpecific=false suppresses provider-keyed UI.
+        provider: .claude,
+        usage: nil,
+        isUsingExtraUsage: false,
+        isLoading: false,
+        error: nil,
+        statusMessage: nil,
+        isStale: false,
+        recoveryAction: .none,
+        lastObservedAt: nil,
+        labelOverride: "Start a session to track usage",
+        isProviderSpecific: false
+    )
+}
+
 struct ExpandedPanelView: View {
     let sessionStore: SessionStore
     let usageService: ClaudeUsageService
+    let codexUsageService: CodexUsageService
     @Binding var showingSettings: Bool
     @Binding var showingSessionActivity: Bool
     @Binding var isActivityCollapsed: Bool
+    @Binding var hoveredSessionId: String?
+
+    init(
+        sessionStore: SessionStore,
+        usageService: ClaudeUsageService,
+        codexUsageService: CodexUsageService,
+        showingSettings: Binding<Bool>,
+        showingSessionActivity: Binding<Bool>,
+        isActivityCollapsed: Binding<Bool>,
+        hoveredSessionId: Binding<String?>
+    ) {
+        self.sessionStore = sessionStore
+        self.usageService = usageService
+        self.codexUsageService = codexUsageService
+        _showingSettings = showingSettings
+        _showingSessionActivity = showingSessionActivity
+        _isActivityCollapsed = isActivityCollapsed
+        _hoveredSessionId = hoveredSessionId
+    }
 
     private var effectiveSession: SessionData? {
         sessionStore.effectiveSession
+    }
+
+    private var hoveredSession: SessionData? {
+        guard let hoveredSessionId else { return nil }
+        return sessionStore.sortedSessions.first { $0.id == hoveredSessionId }
+    }
+
+    private var usageContextSession: SessionData? {
+        hoveredSession ?? effectiveSession
     }
 
     private var state: NotchiState {
@@ -137,6 +228,60 @@ struct ExpandedPanelView: View {
 
     private var shouldShowSessionPicker: Bool {
         sessionStore.activeSessionCount >= 2 && !showingSessionActivity
+    }
+
+    private var sharedUsageResetLabelPrefix: String? {
+        Self.sharedUsageResetLabelPrefix(
+            state: sharedUsageBarState,
+            activeSessions: sessionStore.sortedSessions
+        )
+    }
+
+    private var sharedUsageBarState: SharedUsageBarState? {
+        let activeSessions = sessionStore.sortedSessions
+        guard Self.shouldShowSharedUsageBar(
+            contextSession: usageContextSession,
+            activeSessions: activeSessions
+        ) else {
+            return nil
+        }
+
+        if activeSessions.isEmpty {
+            return .noActiveSession
+        }
+
+        let includesClaude = Self.includesClaudeUsage(activeSessions: activeSessions)
+        let includesCodex = Self.includesCodexUsage(activeSessions: activeSessions)
+
+        let claude = includesClaude ? SharedUsageBarState(
+            provider: .claude,
+            usage: usageService.currentUsage,
+            isUsingExtraUsage: usageService.isUsingExtraUsage,
+            isLoading: usageService.isLoading,
+            error: usageService.error,
+            statusMessage: usageService.statusMessage,
+            isStale: usageService.isUsageStale,
+            recoveryAction: usageService.recoveryAction,
+            lastObservedAt: usageService.lastObservedAt
+        ) : nil
+
+        let codex = includesCodex ? SharedUsageBarState(
+            provider: .codex,
+            usage: codexUsageService.currentUsage,
+            isUsingExtraUsage: false,
+            isLoading: false,
+            error: nil,
+            statusMessage: codexUsageService.statusMessage,
+            isStale: codexUsageService.isUsageStale,
+            recoveryAction: .none,
+            lastObservedAt: codexUsageService.lastObservedAt
+        ) : nil
+
+        return Self.sharedUsageBarState(
+            contextSession: usageContextSession,
+            claude: claude,
+            codex: codex
+        )
     }
 
     private var primaryContentTransition: AnyTransition {
@@ -229,12 +374,13 @@ struct ExpandedPanelView: View {
                             sessionStore.displayTitle(for: session)
                         },
                         selectedSessionId: sessionStore.selectedSessionId,
+                        hoveredSessionId: $hoveredSessionId,
                         onSelectSession: { sessionId in
-                            sessionStore.selectSession(sessionId)
+                            sessionStore.selectSession(matchingStableId: sessionId)
                             showingSessionActivity = true
                         },
                         onDeleteSession: { sessionId in
-                            sessionStore.dismissSession(sessionId)
+                            sessionStore.dismissSession(matchingStableId: sessionId)
                         }
                     )
                 }
@@ -272,7 +418,11 @@ struct ExpandedPanelView: View {
                 }
 
                 if showIndicator && !isActivityCollapsed {
-                    WorkingIndicatorView(state: state, workingVerb: currentSpinnerVerb)
+                    WorkingIndicatorView(
+                        state: state,
+                        workingVerb: currentSpinnerVerb,
+                        color: effectiveSession?.provider.accentColor ?? TerminalColors.claudeOrange
+                    )
                 }
             }
             .padding(.horizontal, 12)
@@ -282,18 +432,91 @@ struct ExpandedPanelView: View {
 
     @ViewBuilder
     private var sharedUsageBar: some View {
-        UsageBarView(
-            usage: usageService.currentUsage,
-            isUsingExtraUsage: usageService.isUsingExtraUsage,
-            isLoading: usageService.isLoading,
-            error: usageService.error,
-            statusMessage: usageService.statusMessage,
-            isStale: usageService.isUsageStale,
-            recoveryAction: usageService.recoveryAction,
-            compact: !shouldShowSessionPicker && isActivityCollapsed,
-            onConnect: { ClaudeUsageService.shared.connectAndStartPolling() },
-            onRetry: { ClaudeUsageService.shared.retryNow() }
-        )
+        if let state = sharedUsageBarState {
+            UsageBarView(
+                usage: state.usage,
+                isUsingExtraUsage: state.isUsingExtraUsage,
+                isLoading: state.isLoading,
+                error: state.error,
+                statusMessage: state.statusMessage,
+                isStale: state.isStale,
+                recoveryAction: state.recoveryAction,
+                label: state.label,
+                resetLabelPrefix: sharedUsageResetLabelPrefix,
+                compact: !shouldShowSessionPicker && isActivityCollapsed,
+                isEnabled: state.isProviderSpecific ? Self.sharedUsageBarIsEnabled(provider: state.provider) : true,
+                onConnect: state.provider == .claude && state.isProviderSpecific ? { usageService.connectAndStartPolling() } : nil,
+                onRetry: state.provider == .claude && state.isProviderSpecific ? { usageService.retryNow() } : nil
+            )
+        }
+    }
+
+    static func shouldShowSharedUsageBar(contextSession: SessionData?, activeSessions: [SessionData]) -> Bool {
+        !activeSessions.isEmpty || contextSession == nil
+    }
+
+    static func includesClaudeUsage(activeSessions: [SessionData]) -> Bool {
+        activeSessions.contains { $0.provider == .claude }
+    }
+
+    static func includesCodexUsage(activeSessions: [SessionData]) -> Bool {
+        activeSessions.contains { $0.provider == .codex }
+    }
+
+    static func hasMixedClaudeAndCodexSessions(_ activeSessions: [SessionData]) -> Bool {
+        activeSessions.contains { $0.provider == .claude }
+            && activeSessions.contains { $0.provider == .codex }
+    }
+
+    static func sharedUsageResetLabelPrefix(
+        state: SharedUsageBarState?,
+        activeSessions: [SessionData]
+    ) -> String? {
+        guard let state, hasMixedClaudeAndCodexSessions(activeSessions) else {
+            return nil
+        }
+        return state.provider.displayName
+    }
+
+    static func sharedUsageBarIsEnabled(
+        provider: AgentProvider,
+        appUsageEnabled: Bool = AppSettings.isUsageEnabled
+    ) -> Bool {
+        provider == .codex || appUsageEnabled
+    }
+
+    static func sharedUsageBarState(
+        contextSession: SessionData?,
+        claude: SharedUsageBarState?,
+        codex: SharedUsageBarState?
+    ) -> SharedUsageBarState? {
+        guard let claude, let codex else {
+            return claude ?? codex
+        }
+
+        if let contextSession {
+            switch contextSession.provider {
+            case .claude:
+                return claude
+            case .codex:
+                return codex
+            }
+        }
+
+        if let claudeObservedAt = claude.lastObservedAt,
+           let codexObservedAt = codex.lastObservedAt,
+           claudeObservedAt != codexObservedAt {
+            return codexObservedAt > claudeObservedAt ? codex : claude
+        }
+
+        if claude.usage == nil, codex.usage != nil {
+            return codex
+        }
+        if codex.usage == nil, claude.usage != nil {
+            return claude
+        }
+
+        return claude
     }
 
     private var activitySection: some View {
@@ -321,8 +544,12 @@ struct ExpandedPanelView: View {
                     ScrollViewReader { proxy in
                         ScrollView(showsIndicators: false) {
                             VStack(alignment: .leading, spacing: 0) {
-                                if let prompt = effectiveSession?.lastUserPrompt {
-                                    UserPromptBubbleView(text: prompt)
+                                if effectiveSession?.lastUserPrompt != nil ||
+                                    effectiveSession?.lastUserPromptHasAttachments == true {
+                                    UserPromptBubbleView(
+                                        text: effectiveSession?.lastUserPrompt,
+                                        hasAttachment: effectiveSession?.lastUserPromptHasAttachments == true
+                                    )
                                         .frame(maxWidth: .infinity, alignment: .trailing)
                                         .padding(.bottom, 8)
                                 }
@@ -381,11 +608,11 @@ struct ExpandedPanelView: View {
     }
 
     private var emptyState: some View {
-        let hooksInstalled = HookInstaller.isInstalled()
+        let hooksInstalled = IntegrationCoordinator.shared.hasAnyInstalledHooks()
         let title = hooksInstalled ? "Waiting for activity" : "Hooks not installed"
         let subtitle = hooksInstalled
-            ? "Send a message in Claude Code to start tracking"
-            : "Open settings to set up Claude Code integration"
+            ? "Start Claude Code or Codex to begin tracking"
+            : "Open settings to set up Claude Code and Codex integration"
 
         return VStack(spacing: 8) {
             MorphingText(

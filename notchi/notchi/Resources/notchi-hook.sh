@@ -43,6 +43,7 @@ status_map = {
 }
 
 output = {
+    'provider': 'claude',
     'session_id': input_data.get('session_id', ''),
     'transcript_path': input_data.get('transcript_path', ''),
     'cwd': input_data.get('cwd', ''),

@@ -41,4 +41,21 @@ final class SessionDataTests: XCTestCase {
         XCTAssertNotEqual(session.currentSpinnerVerb, initialVerb)
         XCTAssertTrue(SpinnerVerbs.all.contains(session.currentSpinnerVerb))
     }
+
+    func testSessionStartsWithProviderSpecificSpinnerVerb() {
+        let claude = SessionData(sessionId: "claude-session", provider: .claude, cwd: "/tmp/project")
+        let codex = SessionData(sessionId: "codex-session", provider: .codex, cwd: "/tmp/project")
+
+        XCTAssertEqual(claude.currentSpinnerVerb, "Clauding")
+        XCTAssertEqual(codex.currentSpinnerVerb, "Codexing")
+    }
+
+    func testStableIdentifierIncludesProviderWhenRawSessionIdMatches() {
+        let claude = SessionData(sessionId: "shared-session", provider: .claude, cwd: "/tmp/project")
+        let codex = SessionData(sessionId: "shared-session", provider: .codex, cwd: "/tmp/project")
+
+        XCTAssertNotEqual(claude.id, codex.id)
+        XCTAssertEqual(claude.id, "claude:shared-session")
+        XCTAssertEqual(codex.id, "codex:shared-session")
+    }
 }

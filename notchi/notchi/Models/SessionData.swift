@@ -13,6 +13,9 @@ struct PendingQuestion {
 @Observable
 final class SessionData: Identifiable {
     let id: String
+    let provider: AgentProvider
+    let rawSessionId: String
+    let sessionKey: ProviderSessionKey
     let cwd: String
     let sessionStartTime: Date
     let spriteXPosition: CGFloat
@@ -29,10 +32,16 @@ final class SessionData: Identifiable {
     private(set) var recentEvents: [SessionEvent] = []
     private(set) var recentAssistantMessages: [AssistantMessage] = []
     private(set) var lastUserPrompt: String?
+    private(set) var lastUserPromptHasAttachments: Bool = false
     private(set) var promptSubmitTime: Date?
     private(set) var permissionMode: String = "default"
     private(set) var pendingQuestions: [PendingQuestion] = []
-    private(set) var currentSpinnerVerb: String = SpinnerVerbs.randomWorkingVerb()
+    private(set) var currentSpinnerVerb: String
+    private(set) var codexProcessId: Int?
+    private(set) var codexOrigin: CodexOrigin?
+    private(set) var codexTitle: String?
+    private(set) var codexTranscriptPath: String?
+    private(set) var codexArchived: Bool = false
 
     private var durationTimer: Task<Void, Never>?
     private var sleepTimer: Task<Void, Never>?
@@ -66,6 +75,14 @@ final class SessionData: Identifiable {
         return nil
     }
 
+    var isCodexCLIProcessBacked: Bool {
+        provider == .codex && codexOrigin == .cli && codexProcessId != nil
+    }
+
+    var isCodexThreadBacked: Bool {
+        provider == .codex && codexTranscriptPath != nil
+    }
+
     // Sprite positioning constants (normalized 0..1 range for X, points for Y)
     private static let xPositionMin: CGFloat = 0.05
     private static let xPositionRange: CGFloat = 0.90
@@ -76,18 +93,45 @@ final class SessionData: Identifiable {
     private static let yOffsetBase: CGFloat = -5.0
     private static let yOffsetRange: UInt = 51
 
-    init(sessionId: String, cwd: String, isInteractive: Bool = true, existingXPositions: [CGFloat] = []) {
-        self.id = sessionId
+    init(
+        sessionKey: ProviderSessionKey,
+        cwd: String,
+        isInteractive: Bool = true,
+        existingXPositions: [CGFloat] = [],
+        sessionStartTime: Date = Date()
+    ) {
+        self.id = sessionKey.stableId
+        self.provider = sessionKey.provider
+        self.rawSessionId = sessionKey.rawSessionId
+        self.sessionKey = sessionKey
         self.cwd = cwd
         self.isInteractive = isInteractive
-        self.sessionStartTime = Date()
-        self.lastActivity = Date()
+        self.sessionStartTime = sessionStartTime
+        self.lastActivity = sessionStartTime
+        self.currentSpinnerVerb = SpinnerVerbs.providerVerb(for: sessionKey.provider)
 
-        let hash = UInt(bitPattern: sessionId.hashValue)
+        let hash = UInt(bitPattern: sessionKey.stableId.hashValue)
         self.spriteXPosition = Self.resolveXPosition(hash: hash, existingPositions: existingXPositions)
         self.spriteYOffset = Self.resolveYOffset(hash: hash)
 
         startDurationTimer()
+    }
+
+    convenience init(
+        sessionId: String,
+        provider: AgentProvider = .claude,
+        cwd: String,
+        isInteractive: Bool = true,
+        existingXPositions: [CGFloat] = [],
+        sessionStartTime: Date = Date()
+    ) {
+        self.init(
+            sessionKey: ProviderSessionKey(provider: provider, rawSessionId: sessionId),
+            cwd: cwd,
+            isInteractive: isInteractive,
+            existingXPositions: existingXPositions,
+            sessionStartTime: sessionStartTime
+        )
     }
 
     private static func resolveXPosition(hash: UInt, existingPositions: [CGFloat]) -> CGFloat {
@@ -143,9 +187,15 @@ final class SessionData: Identifiable {
         lastActivity = Date()
     }
 
-    func recordUserPrompt(_ prompt: String) {
+    func recordUserPrompt(_ prompt: String?, hasAttachments: Bool = false) {
         let now = Date()
-        lastUserPrompt = prompt.truncatedForPrompt()
+        if let trimmedPrompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !trimmedPrompt.isEmpty {
+            lastUserPrompt = trimmedPrompt.truncatedForPrompt()
+        } else {
+            lastUserPrompt = nil
+        }
+        lastUserPromptHasAttachments = hasAttachments
         promptSubmitTime = now
         lastActivity = now
         logger.debug("Setting promptSubmitTime to: \(now)")
@@ -157,6 +207,39 @@ final class SessionData: Identifiable {
 
     func updatePermissionMode(_ mode: String) {
         permissionMode = mode
+    }
+
+    func updateCodexRuntime(processId: Int?, origin: CodexOrigin?) {
+        guard provider == .codex else { return }
+
+        if let processId, processId > 0 {
+            codexProcessId = processId
+        }
+
+        if let origin {
+            codexOrigin = origin
+        }
+    }
+
+    func updateCodexTitle(_ title: String?) {
+        guard provider == .codex,
+              let title = title?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else { return }
+
+        codexTitle = title.truncatedForPrompt()
+    }
+
+    func updateCodexThreadMetadata(transcriptPath: String, metadata: CodexThreadMetadata?) {
+        guard provider == .codex else { return }
+
+        let trimmedPath = transcriptPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else { return }
+
+        codexTranscriptPath = trimmedPath
+
+        guard let metadata else { return }
+        updateCodexTitle(metadata.title)
+        codexArchived = metadata.archived
     }
 
     func setPendingQuestions(_ questions: [PendingQuestion]) {

@@ -4,6 +4,7 @@ struct SessionListView: View {
     let sessions: [SessionData]
     let titleForSession: (SessionData) -> String
     let selectedSessionId: String?
+    @Binding var hoveredSessionId: String?
     let onSelectSession: (String) -> Void
     let onDeleteSession: (String) -> Void
 
@@ -22,7 +23,16 @@ struct SessionListView: View {
                             session: session,
                             title: titleForSession(session),
                             isSelected: session.id == selectedSessionId,
+                            isHovered: session.id == hoveredSessionId,
                             onTap: { onSelectSession(session.id) },
+                            onHover: { hovering in
+                                if hovering {
+                                    hoveredSessionId = session.id
+                                } else if hoveredSessionId == session.id {
+                                    // SwiftUI may deliver a leave after another row's enter; only the owner clears.
+                                    hoveredSessionId = nil
+                                }
+                            },
                             onDelete: { onDeleteSession(session.id) }
                         )
                     }

@@ -1,19 +1,25 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "SocketServer")
+nonisolated private let logger = Logger(subsystem: "com.ruban.notchi", category: "SocketServer")
 
-typealias HookEventHandler = @Sendable (HookEvent) -> Void
+typealias AgentHookEnvelopeHandler = @Sendable (AgentHookEnvelope) -> Void
 
-final class SocketServer {
+// WHY: SocketServer owns its synchronization via serverQueue/clientQueue rather
+// than the main actor, so it should not inherit the project's default UI
+// isolation.
+nonisolated final class SocketServer: @unchecked Sendable {
     static let socketPath = "/tmp/notchi.sock"
     static let shared = SocketServer(socketPath: socketPath, clientReadTimeout: 0.5)
+    private static let startRetryDelay: DispatchTimeInterval = .milliseconds(250)
+    private static let maxStartRetryAttempts = 8
 
     private let socketPath: String
     private let clientReadTimeout: TimeInterval
     private var serverSocket: Int32 = -1
     private var acceptSource: DispatchSourceRead?
-    private var eventHandler: HookEventHandler?
+    private var eventHandler: AgentHookEnvelopeHandler?
+    private var pendingStartRetry: DispatchWorkItem?
     private let serverQueue = DispatchQueue(label: "com.ruban.notchi.socket.server", qos: .userInitiated)
     private let clientQueue = DispatchQueue(label: "com.ruban.notchi.socket.client", qos: .userInitiated, attributes: .concurrent)
 
@@ -22,20 +28,33 @@ final class SocketServer {
         self.clientReadTimeout = clientReadTimeout
     }
 
-    func start(onEvent: @escaping HookEventHandler) {
+    func start(onEvent: @escaping AgentHookEnvelopeHandler) {
         serverQueue.async { [weak self] in
-            self?.startServer(onEvent: onEvent)
+            self?.startServer(
+                onEvent: onEvent,
+                retryAttemptsRemaining: Self.maxStartRetryAttempts
+            )
         }
     }
 
-    private func startServer(onEvent: @escaping HookEventHandler) {
+    private func startServer(
+        onEvent: @escaping AgentHookEnvelopeHandler,
+        retryAttemptsRemaining: Int
+    ) {
         guard serverSocket < 0 else { return }
 
         switch prepareSocketPathForBinding() {
         case .ready:
+            // WHY: a previous retry may already be queued when the old listener
+            // finally disappears; cancel it once we successfully own the path.
+            pendingStartRetry?.cancel()
+            pendingStartRetry = nil
             break
         case .alreadyActive:
-            logger.warning("Socket listener already active at \(self.socketPath, privacy: .public); skipping duplicate startup")
+            scheduleStartRetry(
+                onEvent: onEvent,
+                retryAttemptsRemaining: retryAttemptsRemaining
+            )
             return
         case .failed(let errorCode):
             logger.error("Failed to prepare socket path: \(errorCode)")
@@ -165,6 +184,9 @@ final class SocketServer {
     }
 
     private func stopServer() {
+        pendingStartRetry?.cancel()
+        pendingStartRetry = nil
+
         if let acceptSource {
             acceptSource.cancel()
             self.acceptSource = nil
@@ -214,12 +236,12 @@ final class SocketServer {
         }
     }
 
-    private func handleClient(_ clientSocket: Int32, eventHandler: HookEventHandler?) {
+    private func handleClient(_ clientSocket: Int32, eventHandler: AgentHookEnvelopeHandler?) {
         defer { close(clientSocket) }
 
         guard let allData = readClientPayload(from: clientSocket), !allData.isEmpty else { return }
 
-        guard let event = try? JSONDecoder().decode(HookEvent.self, from: allData) else {
+        guard let event = try? JSONDecoder().decode(AgentHookEnvelope.self, from: allData) else {
             logger.warning("Failed to parse event")
             return
         }
@@ -303,21 +325,50 @@ final class SocketServer {
         return Int32(min(milliseconds, Int(Int32.max)))
     }
 
-    private func logEvent(_ event: HookEvent) {
+    private func scheduleStartRetry(
+        onEvent: @escaping AgentHookEnvelopeHandler,
+        retryAttemptsRemaining: Int
+    ) {
+        guard retryAttemptsRemaining > 0 else {
+            logger.error(
+                "Socket listener remained busy at \(self.socketPath, privacy: .public); giving up after retries"
+            )
+            return
+        }
+
+        logger.warning(
+            "Socket listener already active at \(self.socketPath, privacy: .public); retrying startup (\(retryAttemptsRemaining - 1) attempts left)"
+        )
+
+        pendingStartRetry?.cancel()
+        let workItem = DispatchWorkItem { [weak self] in
+            self?.startServer(
+                onEvent: onEvent,
+                retryAttemptsRemaining: retryAttemptsRemaining - 1
+            )
+        }
+        pendingStartRetry = workItem
+        serverQueue.asyncAfter(
+            deadline: .now() + Self.startRetryDelay,
+            execute: workItem
+        )
+    }
+
+    private func logEvent(_ event: AgentHookEnvelope) {
         switch event.event {
         case "SessionStart":
-            logger.info("Session started")
+            logger.info("\(event.provider.rawValue, privacy: .public) session started")
         case "SessionEnd":
-            logger.info("Session ended")
+            logger.info("\(event.provider.rawValue, privacy: .public) session ended")
         case "PreToolUse":
             let tool = event.tool ?? "unknown"
-            logger.info("Tool: \(tool, privacy: .public)")
+            logger.info("\(event.provider.rawValue, privacy: .public) tool: \(tool, privacy: .public)")
         case "PostToolUse":
             let tool = event.tool ?? "unknown"
             let success = event.status != "error"
-            logger.info("Result: \(success ? "✓" : "✗", privacy: .public) \(tool, privacy: .public)")
+            logger.info("\(event.provider.rawValue, privacy: .public) result: \(success ? "✓" : "✗", privacy: .public) \(tool, privacy: .public)")
         case "Stop", "SubagentStop":
-            logger.info("Done")
+            logger.info("\(event.provider.rawValue, privacy: .public) done")
         default:
             break
         }

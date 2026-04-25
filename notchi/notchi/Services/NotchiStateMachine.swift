@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import os.log
 
 private let logger = Logger(subsystem: "com.ruban.notchi", category: "StateMachine")
@@ -11,125 +12,262 @@ final class NotchiStateMachine {
     let sessionStore = SessionStore.shared
 
     private var emotionDecayTimer: Task<Void, Never>?
-    private var pendingSyncTasks: [String: Task<Void, Never>] = [:]
-    private var pendingPositionMarks: [String: Task<Void, Never>] = [:]
-    private var fileWatchers: [String: (source: DispatchSourceFileSystemObject, fd: Int32)] = [:]
+    private var pendingSyncTasks: [ProviderSessionKey: Task<Void, Never>] = [:]
+    private var pendingPositionMarks: [ProviderSessionKey: Task<Void, Never>] = [:]
+    private var pendingCodexSessionStartTimes: [ProviderSessionKey: Date] = [:]
+    private var codexProcessMonitorTask: Task<Void, Never>?
+    private var codexThreadMetadataMonitorTask: Task<Void, Never>?
+    private var codexThreadMetadataRefreshTask: Task<Void, Never>?
+    private var codexThreadMetadataImmediateRefreshKeys: Set<ProviderSessionKey> = []
+    private var codexThreadMetadataAutoRefreshEnabled = true
+    private var codexProcessMissCounts: [ProviderSessionKey: Int] = [:]
+    private var fileWatchers: [ProviderSessionKey: (source: DispatchSourceFileSystemObject, fd: Int32)] = [:]
     var handleClaudeUsageResumeTrigger: (ClaudeUsageResumeTrigger) -> Void = { trigger in
         ClaudeUsageService.shared.handleClaudeResumeTrigger(trigger)
+    }
+    var isCodexProcessAlive: (Int) -> Bool
+    var clearCodexUsage: () -> Void = {
+        CodexUsageService.shared.clear()
     }
 
     private static let syncDebounce: Duration = .milliseconds(100)
     private static let waitingClearGuard: TimeInterval = 2.0
+    private static let codexProcessMonitorInterval: Duration = .seconds(2)
+    private static let codexThreadMetadataMonitorInterval: Duration = .seconds(5)
+    private static let codexProcessMissLimit = 2
+    private static let pendingCodexSessionStartMaxAge: TimeInterval = 10 * 60
 
     var currentState: NotchiState {
         sessionStore.effectiveSession?.state ?? .idle
     }
 
     private init() {
+        isCodexProcessAlive = Self.defaultCodexProcessAlive
         startEmotionDecayTimer()
     }
 
     func handleEvent(_ event: HookEvent) {
-        let session = sessionStore.process(event)
-        let isDone = event.status == "waiting_for_input"
+        trimPendingCodexSessionStartTimes()
+
         let transcriptPath = ConversationParser.resolvedTranscriptPath(
-            sessionId: event.sessionId,
+            for: event.provider,
+            sessionId: event.rawSessionId,
             cwd: event.cwd,
             transcriptPath: event.transcriptPath
         )
+        let isDone = event.status == "waiting_for_input"
+
+        // WHY: Codex emits SessionStart before there is any user-visible content for a
+        // brand new chat. Start watching immediately, but don't surface a blank session
+        // until later events give us real prompt/reply/tool content.
+        if event.provider == .codex,
+           event.event == .sessionStarted,
+           sessionStore.session(for: event.sessionKey) == nil {
+            pendingCodexSessionStartTimes[event.sessionKey] = Date()
+            refreshCodexSessionStartTracking(
+                sessionKey: event.sessionKey,
+                transcriptPath: transcriptPath,
+                isInteractive: event.interactive ?? true
+            )
+
+            return
+        }
+
+        let sessionStartTimeOverride = pendingSessionStartTimeOverride(for: event)
+        let session = sessionStore.process(event, sessionStartTimeOverride: sessionStartTimeOverride)
+        refreshCodexProcessMonitoring()
+        refreshCodexThreadMetadataMonitoring()
+        scheduleInitialCodexThreadMetadataRefreshIfNeeded(for: event)
+
+        if event.event != .sessionEnded, session.codexArchived {
+            endCodexArchivedSessions([session])
+            return
+        }
 
         switch event.event {
-        case "UserPromptSubmit":
-            pendingPositionMarks[event.sessionId] = Task {
-                await ConversationParser.shared.markCurrentPosition(
-                    sessionId: event.sessionId,
-                    transcriptPath: transcriptPath
-                )
-            }
-            if session.isInteractive {
-                startFileWatcher(sessionId: event.sessionId, transcriptPath: transcriptPath)
+        case .userPromptSubmitted:
+            if let transcriptPath {
+                pendingPositionMarks[event.sessionKey] = Task {
+                    await ConversationParser.shared.markCurrentPosition(
+                        sessionKey: event.sessionKey,
+                        transcriptPath: transcriptPath
+                    )
+                }
+            } else {
+                pendingPositionMarks.removeValue(forKey: event.sessionKey)?.cancel()
             }
 
-            if session.isInteractive, let prompt = event.userPrompt {
+            if session.isInteractive, let transcriptPath {
+                startFileWatcher(sessionKey: event.sessionKey, transcriptPath: transcriptPath)
+            }
+
+            if session.isInteractive,
+               event.provider.capabilities.supportsPromptEmotionAnalysis,
+               let prompt = event.userPrompt {
                 Task {
                     let result = await EmotionAnalyzer.shared.analyze(prompt)
                     session.emotionState.recordEmotion(result.emotion, intensity: result.intensity, prompt: prompt)
                 }
             }
 
-            if session.isInteractive, !SessionStore.isLocalSlashCommand(event.userPrompt) {
+            if session.isInteractive,
+               event.provider.capabilities.supportsUsageResumeTriggers,
+               !SessionStore.isLocalSlashCommand(event.userPrompt) {
                 handleClaudeUsageResumeTrigger(.userPromptSubmit)
             }
 
-        case "PreToolUse":
+        case .preToolUse:
             if isDone {
-                SoundService.shared.playNotificationSound(sessionId: event.sessionId, isInteractive: session.isInteractive)
+                SoundService.shared.playNotificationSound(sessionKey: event.sessionKey, isInteractive: session.isInteractive)
             }
 
-        case "PermissionRequest":
-            SoundService.shared.playNotificationSound(sessionId: event.sessionId, isInteractive: session.isInteractive)
+        case .permissionRequest:
+            if event.provider.capabilities.supportsPermissionPrompts {
+                SoundService.shared.playNotificationSound(sessionKey: event.sessionKey, isInteractive: session.isInteractive)
+            }
 
-        case "PostToolUse":
-            scheduleFileSync(sessionId: event.sessionId, transcriptPath: transcriptPath)
+        case .postToolUse:
+            if let transcriptPath {
+                scheduleFileSync(sessionKey: event.sessionKey, transcriptPath: transcriptPath)
+            }
 
-        case "SessionStart":
-            handleClaudeUsageResumeTrigger(.sessionStart)
+        case .sessionStarted:
+            if event.provider == .codex {
+                // WHY: Existing Codex sessions can emit SessionStart on resume,
+                // and we still want to refresh the parser baseline/watcher even
+                // though the visible session already exists.
+                refreshCodexSessionStartTracking(
+                    sessionKey: event.sessionKey,
+                    transcriptPath: transcriptPath,
+                    isInteractive: session.isInteractive
+                )
+            }
 
-        case "Stop":
-            SoundService.shared.playNotificationSound(sessionId: event.sessionId, isInteractive: session.isInteractive)
-            stopFileWatcher(sessionId: event.sessionId)
-            scheduleFileSync(sessionId: event.sessionId, transcriptPath: transcriptPath)
+            if event.provider.capabilities.supportsUsageResumeTriggers {
+                handleClaudeUsageResumeTrigger(.sessionStart)
+            }
 
-        case "SessionEnd":
-            stopFileWatcher(sessionId: event.sessionId)
-            pendingSyncTasks.removeValue(forKey: event.sessionId)?.cancel()
-            pendingPositionMarks.removeValue(forKey: event.sessionId)?.cancel()
-            SoundService.shared.clearCooldown(for: event.sessionId)
-            Task { await ConversationParser.shared.resetState(for: event.sessionId) }
+        case .stop:
+            SoundService.shared.playNotificationSound(sessionKey: event.sessionKey, isInteractive: session.isInteractive)
+            stopFileWatcher(sessionKey: event.sessionKey)
+            if let transcriptPath {
+                scheduleFileSync(sessionKey: event.sessionKey, transcriptPath: transcriptPath)
+            }
+
+        case .sessionEnded:
+            pendingCodexSessionStartTimes.removeValue(forKey: event.sessionKey)
+            codexThreadMetadataImmediateRefreshKeys.remove(event.sessionKey)
+            stopFileWatcher(sessionKey: event.sessionKey)
+            pendingSyncTasks.removeValue(forKey: event.sessionKey)?.cancel()
+            pendingPositionMarks.removeValue(forKey: event.sessionKey)?.cancel()
+            SoundService.shared.clearCooldown(for: event.sessionKey)
+            Task { await ConversationParser.shared.resetState(for: event.sessionKey) }
             if sessionStore.activeSessionCount == 0 {
                 logger.info("Global state: idle")
             }
+            refreshCodexProcessMonitoring()
+            refreshCodexThreadMetadataMonitoring()
             return
 
         default:
             if isDone && session.task != .idle {
-                SoundService.shared.playNotificationSound(sessionId: event.sessionId, isInteractive: session.isInteractive)
+                SoundService.shared.playNotificationSound(sessionKey: event.sessionKey, isInteractive: session.isInteractive)
             }
         }
 
         session.resetSleepTimer()
     }
 
-    private func scheduleFileSync(sessionId: String, transcriptPath: String) {
-        pendingSyncTasks[sessionId]?.cancel()
-        pendingSyncTasks[sessionId] = Task {
-            // Wait for position marking to complete first
-            await pendingPositionMarks[sessionId]?.value
+    private func scheduleFileSync(sessionKey: ProviderSessionKey, transcriptPath: String) {
+        pendingSyncTasks[sessionKey]?.cancel()
+        pendingSyncTasks[sessionKey] = Task {
+            await pendingPositionMarks[sessionKey]?.value
 
             try? await Task.sleep(for: Self.syncDebounce)
             guard !Task.isCancelled else { return }
 
             let result = await ConversationParser.shared.parseIncremental(
-                sessionId: sessionId,
+                sessionKey: sessionKey,
                 transcriptPath: transcriptPath
             )
 
+            applyParsedSessionEvents(result.events, for: sessionKey)
+
             if !result.messages.isEmpty {
-                sessionStore.recordAssistantMessages(result.messages, for: sessionId)
+                sessionStore.recordAssistantMessages(result.messages, for: sessionKey)
             }
 
             reconcileFileSyncResult(
                 result,
-                for: sessionId,
-                hasActiveWatcher: fileWatchers[sessionId] != nil
+                for: sessionKey,
+                hasActiveWatcher: fileWatchers[sessionKey] != nil
             )
 
-            pendingSyncTasks.removeValue(forKey: sessionId)
+            pendingSyncTasks.removeValue(forKey: sessionKey)
         }
     }
 
-    func reconcileFileSyncResult(_ result: ParseResult, for sessionId: String, hasActiveWatcher: Bool) {
-        guard let session = sessionStore.sessions[sessionId] else { return }
+    private func refreshCodexSessionStartTracking(
+        sessionKey: ProviderSessionKey,
+        transcriptPath: String?,
+        isInteractive: Bool
+    ) {
+        guard let transcriptPath else { return }
+
+        pendingPositionMarks[sessionKey] = Task {
+            await ConversationParser.shared.markCurrentPosition(
+                sessionKey: sessionKey,
+                transcriptPath: transcriptPath
+            )
+        }
+
+        if isInteractive {
+            startFileWatcher(sessionKey: sessionKey, transcriptPath: transcriptPath)
+        }
+    }
+
+    private func pendingSessionStartTimeOverride(for event: HookEvent) -> Date? {
+        guard event.provider == .codex,
+              sessionStore.session(for: event.sessionKey) == nil else {
+            return nil
+        }
+
+        return pendingCodexSessionStartTimes.removeValue(forKey: event.sessionKey)
+    }
+
+    private func trimPendingCodexSessionStartTimes(now: Date = Date()) {
+        let cutoff = now.addingTimeInterval(-Self.pendingCodexSessionStartMaxAge)
+        pendingCodexSessionStartTimes = pendingCodexSessionStartTimes.filter { _, startTime in
+            startTime >= cutoff
+        }
+    }
+
+    func applyParsedSessionEvents(_ events: [ParsedSessionEvent], for sessionKey: ProviderSessionKey) {
+        guard !events.isEmpty,
+              let session = sessionStore.session(for: sessionKey) else { return }
+
+        for event in events {
+            _ = sessionStore.process(
+                HookEvent(
+                    provider: session.provider,
+                    rawSessionId: session.rawSessionId,
+                    transcriptPath: nil,
+                    cwd: session.cwd,
+                    event: event.event,
+                    status: event.status,
+                    tool: event.tool,
+                    toolInput: event.toolInput,
+                    toolUseId: event.toolUseId,
+                    userPrompt: nil,
+                    permissionMode: nil,
+                    interactive: session.isInteractive
+                )
+            )
+        }
+    }
+
+    func reconcileFileSyncResult(_ result: ParseResult, for sessionKey: ProviderSessionKey, hasActiveWatcher: Bool) {
+        guard let session = sessionStore.session(for: sessionKey) else { return }
 
         if !result.messages.isEmpty,
            session.isInteractive,
@@ -149,8 +287,81 @@ final class NotchiStateMachine {
         }
     }
 
-    private func startFileWatcher(sessionId: String, transcriptPath: String) {
-        stopFileWatcher(sessionId: sessionId)
+    private func reconcileCodexProcessLiveness() {
+        let trackedSessions = sessionStore.sessions.values.filter { $0.isCodexCLIProcessBacked }
+        let trackedKeys = Set(trackedSessions.map(\.sessionKey))
+        codexProcessMissCounts = codexProcessMissCounts.filter { trackedKeys.contains($0.key) }
+
+        var endedSessions: [SessionData] = []
+
+        for session in trackedSessions {
+            guard let processId = session.codexProcessId else { continue }
+
+            if isCodexProcessAlive(processId) {
+                codexProcessMissCounts.removeValue(forKey: session.sessionKey)
+                continue
+            }
+
+            let missCount = (codexProcessMissCounts[session.sessionKey] ?? 0) + 1
+            codexProcessMissCounts[session.sessionKey] = missCount
+
+            if missCount >= Self.codexProcessMissLimit {
+                endedSessions.append(session)
+            }
+        }
+
+        for session in endedSessions {
+            logger.info(
+                "Codex CLI process \(session.codexProcessId ?? -1, privacy: .public) exited; ending session \(session.sessionKey.stableId, privacy: .public)"
+            )
+            codexProcessMissCounts.removeValue(forKey: session.sessionKey)
+            handleEvent(
+                HookEvent(
+                    provider: .codex,
+                    rawSessionId: session.rawSessionId,
+                    transcriptPath: nil,
+                    cwd: session.cwd,
+                    event: .sessionEnded,
+                    status: "ended",
+                    interactive: session.isInteractive,
+                    codexProcessId: session.codexProcessId,
+                    codexOrigin: session.codexOrigin
+                )
+            )
+        }
+
+        refreshCodexProcessMonitoring()
+    }
+
+    private func reconcileCodexThreadMetadata() {
+        scheduleCodexThreadMetadataRefresh()
+    }
+
+    private func endCodexArchivedSessions(_ sessions: [SessionData]) {
+        for session in sessions {
+            logger.info(
+                "Codex thread archived; ending session \(session.sessionKey.stableId, privacy: .public)"
+            )
+            // WHY: Route archive removal through the normal SessionEnd path so
+            // watcher/parser/sound cleanup stays identical to a real end event.
+            handleEvent(
+                HookEvent(
+                    provider: .codex,
+                    rawSessionId: session.rawSessionId,
+                    transcriptPath: nil,
+                    cwd: session.cwd,
+                    event: .sessionEnded,
+                    status: "ended",
+                    interactive: session.isInteractive,
+                    codexProcessId: session.codexProcessId,
+                    codexOrigin: session.codexOrigin
+                )
+            )
+        }
+    }
+
+    private func startFileWatcher(sessionKey: ProviderSessionKey, transcriptPath: String) {
+        stopFileWatcher(sessionKey: sessionKey)
 
         let fd = open(transcriptPath, O_EVTONLY)
         guard fd >= 0 else {
@@ -165,7 +376,7 @@ final class NotchiStateMachine {
         )
 
         source.setEventHandler { [weak self] in
-            self?.scheduleFileSync(sessionId: sessionId, transcriptPath: transcriptPath)
+            self?.scheduleFileSync(sessionKey: sessionKey, transcriptPath: transcriptPath)
         }
 
         source.setCancelHandler {
@@ -173,14 +384,14 @@ final class NotchiStateMachine {
         }
 
         source.resume()
-        fileWatchers[sessionId] = (source: source, fd: fd)
-        logger.debug("Started file watcher for session \(sessionId)")
+        fileWatchers[sessionKey] = (source: source, fd: fd)
+        logger.debug("Started file watcher for session \(sessionKey.stableId, privacy: .public)")
     }
 
-    private func stopFileWatcher(sessionId: String) {
-        guard let watcher = fileWatchers.removeValue(forKey: sessionId) else { return }
+    private func stopFileWatcher(sessionKey: ProviderSessionKey) {
+        guard let watcher = fileWatchers.removeValue(forKey: sessionKey) else { return }
         watcher.source.cancel()
-        logger.debug("Stopped file watcher for session \(sessionId)")
+        logger.debug("Stopped file watcher for session \(sessionKey.stableId, privacy: .public)")
     }
 
     private func startEmotionDecayTimer() {
@@ -195,10 +406,135 @@ final class NotchiStateMachine {
         }
     }
 
+    private func refreshCodexProcessMonitoring() {
+        let shouldMonitor = sessionStore.sessions.values.contains { $0.isCodexCLIProcessBacked }
+
+        if shouldMonitor {
+            guard codexProcessMonitorTask == nil else { return }
+            codexProcessMonitorTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: Self.codexProcessMonitorInterval)
+                    guard !Task.isCancelled else { return }
+                    self?.reconcileCodexProcessLiveness()
+                }
+            }
+        } else {
+            codexProcessMonitorTask?.cancel()
+            codexProcessMonitorTask = nil
+            codexProcessMissCounts.removeAll()
+        }
+    }
+
+    private func refreshCodexThreadMetadataMonitoring() {
+        let shouldMonitor = sessionStore.sessions.values.contains { $0.isCodexThreadBacked }
+
+        if shouldMonitor {
+            guard codexThreadMetadataMonitorTask == nil else { return }
+            codexThreadMetadataMonitorTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: Self.codexThreadMetadataMonitorInterval)
+                    guard !Task.isCancelled else { return }
+                    self?.reconcileCodexThreadMetadata()
+                }
+            }
+        } else {
+            codexThreadMetadataMonitorTask?.cancel()
+            codexThreadMetadataMonitorTask = nil
+            codexThreadMetadataRefreshTask?.cancel()
+            codexThreadMetadataRefreshTask = nil
+            codexThreadMetadataImmediateRefreshKeys.removeAll()
+            clearCodexUsage()
+        }
+    }
+
+    private func scheduleInitialCodexThreadMetadataRefreshIfNeeded(for event: HookEvent) {
+        guard codexThreadMetadataAutoRefreshEnabled,
+              event.provider == .codex,
+              event.transcriptPath != nil,
+              !codexThreadMetadataImmediateRefreshKeys.contains(event.sessionKey) else {
+            return
+        }
+
+        codexThreadMetadataImmediateRefreshKeys.insert(event.sessionKey)
+        scheduleCodexThreadMetadataRefresh()
+    }
+
+    private func scheduleCodexThreadMetadataRefresh() {
+        guard codexThreadMetadataRefreshTask == nil else { return }
+
+        let requests = sessionStore.codexThreadMetadataRequests()
+        guard !requests.isEmpty else {
+            refreshCodexThreadMetadataMonitoring()
+            return
+        }
+
+        let transcriptPaths = requests.map(\.transcriptPath)
+        codexThreadMetadataRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.codexThreadMetadataRefreshTask = nil }
+
+            async let metadataUpdates = self.sessionStore.resolveCodexThreadMetadata(requests)
+            async let usageRefresh: Void = CodexUsageService.shared.refresh(transcriptPaths: transcriptPaths)
+            let updates = await metadataUpdates
+            _ = await usageRefresh
+            guard !Task.isCancelled else { return }
+
+            let archivedSessions = self.sessionStore.applyCodexThreadMetadata(updates)
+            self.endCodexArchivedSessions(archivedSessions)
+            self.refreshCodexThreadMetadataMonitoring()
+        }
+    }
+
+    private nonisolated static func defaultCodexProcessAlive(_ processId: Int) -> Bool {
+        guard processId > 0, processId <= Int(Int32.max) else { return false }
+
+        errno = 0
+        let result = kill(pid_t(processId), 0)
+        return result == 0 || errno == EPERM
+    }
+
     func resetTestingHooks() {
         handleClaudeUsageResumeTrigger = { trigger in
             ClaudeUsageService.shared.handleClaudeResumeTrigger(trigger)
         }
+        isCodexProcessAlive = Self.defaultCodexProcessAlive
+        clearCodexUsage = {
+            CodexUsageService.shared.clear()
+        }
+        codexProcessMonitorTask?.cancel()
+        codexProcessMonitorTask = nil
+        codexThreadMetadataMonitorTask?.cancel()
+        codexThreadMetadataMonitorTask = nil
+        codexThreadMetadataRefreshTask?.cancel()
+        codexThreadMetadataRefreshTask = nil
+        codexThreadMetadataImmediateRefreshKeys.removeAll()
+        codexThreadMetadataAutoRefreshEnabled = true
+        codexProcessMissCounts.removeAll()
+        pendingCodexSessionStartTimes.removeAll()
     }
+
+#if DEBUG
+    func reconcileCodexProcessLivenessForTesting() {
+        reconcileCodexProcessLiveness()
+    }
+
+    func reconcileCodexThreadMetadataForTesting() {
+        let archivedSessions = sessionStore.refreshCodexThreadMetadataForTesting()
+        endCodexArchivedSessions(archivedSessions)
+        refreshCodexThreadMetadataMonitoring()
+    }
+
+    func setCodexThreadMetadataAutoRefreshEnabledForTesting(_ enabled: Bool) {
+        codexThreadMetadataAutoRefreshEnabled = enabled
+    }
+
+    func setPendingCodexSessionStartTimeForTesting(_ startTime: Date, sessionKey: ProviderSessionKey) {
+        pendingCodexSessionStartTimes[sessionKey] = startTime
+    }
+
+    func pendingCodexSessionStartTimeForTesting(sessionKey: ProviderSessionKey) -> Date? {
+        pendingCodexSessionStartTimes[sessionKey]
+    }
+#endif
 
 }

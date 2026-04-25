@@ -3,13 +3,13 @@ import XCTest
 @testable import notchi
 
 actor EventRecorder {
-    private var events: [HookEvent] = []
+    private var events: [AgentHookEnvelope] = []
 
-    func record(_ event: HookEvent) {
+    func record(_ event: AgentHookEnvelope) {
         events.append(event)
     }
 
-    func snapshot() -> [HookEvent] {
+    func snapshot() -> [AgentHookEnvelope] {
         events
     }
 }
@@ -154,6 +154,55 @@ final class SocketServerTests: XCTestCase {
         XCTAssertTrue(duplicateSnapshot.isEmpty, "Duplicate server should not steal the socket path")
     }
 
+    func testDuplicateServerRetriesAndTakesOverAfterOriginalStops() async throws {
+        let firstRecorder = EventRecorder()
+        let secondRecorder = EventRecorder()
+        let probeSessionId = "probe-\(UUID().uuidString)"
+        let handoffSessionId = "handoff-\(UUID().uuidString)"
+        let path = uniqueSocketPath()
+        let (firstServer, listeningPath) = try await makeServer(
+            at: path,
+            clientReadTimeout: 0.5,
+            recorder: firstRecorder
+        )
+
+        let duplicateServer = SocketServer(socketPath: listeningPath, clientReadTimeout: 0.5)
+        activeServers.append((duplicateServer, listeningPath))
+        duplicateServer.start { event in
+            Task {
+                await secondRecorder.record(event)
+            }
+        }
+
+        firstServer.stop()
+
+        let replacementAcceptedProbe = await waitUntil(timeout: 3) { [self] in
+            guard let client = try? UnixSocketClient(path: listeningPath),
+                  let payload = try? makeEventPayload(sessionId: probeSessionId) else {
+                return false
+            }
+            defer { client.closeConnection() }
+
+            do {
+                try client.send(payload)
+                return await secondRecorder.snapshot().contains { $0.sessionId == probeSessionId }
+            } catch {
+                return false
+            }
+        }
+
+        XCTAssertTrue(replacementAcceptedProbe, "Duplicate server should take over after the original listener stops")
+
+        let handoffClient = try UnixSocketClient(path: listeningPath)
+        try handoffClient.send(makeEventPayload(sessionId: handoffSessionId))
+        handoffClient.closeConnection()
+
+        let replacementReceivedEvent = await waitUntil(timeout: 1) {
+            await secondRecorder.snapshot().contains { $0.sessionId == handoffSessionId }
+        }
+        XCTAssertTrue(replacementReceivedEvent)
+    }
+
     func testSocketUsesUserOnlyPermissions() async throws {
         let recorder = EventRecorder()
         let (_, path) = try await makeServer(clientReadTimeout: 0.5, recorder: recorder)
@@ -173,6 +222,38 @@ final class SocketServerTests: XCTestCase {
         let delivered = await waitUntil(timeout: 0.5) {
             let events = await recorder.snapshot()
             return events.count == 1 && events.first?.transcriptPath == transcriptPath
+        }
+
+        XCTAssertTrue(delivered)
+    }
+
+    func testPayloadWithoutProviderDefaultsToClaude() async throws {
+        let recorder = EventRecorder()
+        let (_, path) = try await makeServer(clientReadTimeout: 0.5, recorder: recorder)
+
+        let client = try connectClient(to: path)
+        try client.send(makeEventPayload(sessionId: "default-provider"))
+        client.closeConnection()
+
+        let delivered = await waitUntil(timeout: 0.5) {
+            let events = await recorder.snapshot()
+            return events.count == 1 && events.first?.provider == .claude
+        }
+
+        XCTAssertTrue(delivered)
+    }
+
+    func testPayloadWithCodexProviderDecodesAndPreservesProvider() async throws {
+        let recorder = EventRecorder()
+        let (_, path) = try await makeServer(clientReadTimeout: 0.5, recorder: recorder)
+
+        let client = try connectClient(to: path)
+        try client.send(makeEventPayload(sessionId: "codex-provider", provider: .codex))
+        client.closeConnection()
+
+        let delivered = await waitUntil(timeout: 0.5) {
+            let events = await recorder.snapshot()
+            return events.count == 1 && events.first?.provider == .codex
         }
 
         XCTAssertTrue(delivered)
@@ -211,15 +292,20 @@ final class SocketServerTests: XCTestCase {
         "/tmp/notchi-tests-\(UUID().uuidString).sock"
     }
 
-    private func makeEventPayload(sessionId: String, transcriptPath: String? = nil) throws -> Data {
+    private func makeEventPayload(
+        sessionId: String,
+        provider: AgentProvider? = nil,
+        transcriptPath: String? = nil
+    ) throws -> Data {
         var payload: [String: Any] = [
             "session_id": sessionId,
             "cwd": "/tmp",
             "event": "SessionStart",
             "status": "waiting_for_input",
-            "pid": NSNull(),
-            "tty": NSNull(),
         ]
+        if let provider {
+            payload["provider"] = provider.rawValue
+        }
         if let transcriptPath {
             payload["transcript_path"] = transcriptPath
         }

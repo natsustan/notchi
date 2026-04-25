@@ -176,7 +176,11 @@ private struct SpriteTapTarget: View {
         }
         .buttonStyle(NoHighlightButtonStyle())
         .onHover { hovering in
-            hoveredSessionId = hovering ? sessionId : nil
+            if hovering {
+                hoveredSessionId = sessionId
+            } else if hoveredSessionId == sessionId {
+                hoveredSessionId = nil
+            }
         }
         .scaleEffect(tapScale)
         .offset(x: SpriteLayout.xOffset(xPosition: xPosition, totalWidth: totalWidth), y: yOffset)

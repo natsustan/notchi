@@ -1,17 +1,17 @@
 import Foundation
 import os.log
 
-private let logger = Logger(subsystem: "com.ruban.notchi", category: "HookInstaller")
+nonisolated private let logger = Logger(subsystem: "com.ruban.notchi", category: "HookInstaller")
 
 struct HookInstaller {
-    static let hookCommand = "\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/notchi-hook.sh\""
+    nonisolated static let hookCommand = "\"${CLAUDE_CONFIG_DIR:-$HOME/.claude}/hooks/notchi-hook.sh\""
 
     @discardableResult
-    static func installIfNeeded() -> Bool {
+    nonisolated static func installIfNeeded() -> Bool {
         let claudeConfig = ClaudeConfigDirectoryResolver.resolve()
         let claudeDir = claudeConfig.directoryURL
 
-        guard FileManager.default.fileExists(atPath: claudeDir.path) else {
+        guard claudeConfigDirectoryExists(resolution: claudeConfig) else {
             logger.warning("Claude Code not installed (config dir not found at \(claudeDir.path, privacy: .public))")
             return false
         }
@@ -54,7 +54,7 @@ struct HookInstaller {
         )
     }
 
-    static func upsertHookSettings(from existingData: Data?, command: String) -> Data? {
+    nonisolated static func upsertHookSettings(from existingData: Data?, command: String) -> Data? {
         var json: [String: Any] = [:]
         if let existingData,
            let existing = try? JSONSerialization.jsonObject(with: existingData) as? [String: Any] {
@@ -126,7 +126,7 @@ struct HookInstaller {
         )
     }
 
-    private static func updateSettings(at settingsURL: URL, command: String) -> Bool {
+    nonisolated private static func updateSettings(at settingsURL: URL, command: String) -> Bool {
         let existingData = try? Data(contentsOf: settingsURL)
 
         guard let data = upsertHookSettings(from: existingData, command: command) else {
@@ -144,7 +144,7 @@ struct HookInstaller {
         }
     }
 
-    static func isHookInstalled(in settingsData: Data?) -> Bool {
+    nonisolated static func isHookInstalled(in settingsData: Data?) -> Bool {
         guard let settingsData,
               let json = try? JSONSerialization.jsonObject(with: settingsData) as? [String: Any],
               let hooks = json["hooks"] as? [String: Any] else {
@@ -162,10 +162,17 @@ struct HookInstaller {
         }
     }
 
-    static func isInstalled() -> Bool {
+    nonisolated static func isInstalled() -> Bool {
         let settings = ClaudeConfigDirectoryResolver.resolve().settingsURL
 
         return isHookInstalled(in: try? Data(contentsOf: settings))
+    }
+
+    nonisolated static func claudeConfigDirectoryExists(
+        resolution: ClaudeConfigDirectoryResolution = ClaudeConfigDirectoryResolver.resolve(),
+        fileManager: FileManager = .default
+    ) -> Bool {
+        fileManager.fileExists(atPath: resolution.directoryURL.path)
     }
 
     static func uninstall() {

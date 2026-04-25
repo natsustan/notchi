@@ -9,6 +9,7 @@ private let logger = Logger(subsystem: "com.ruban.notchi", category: "AppDelegat
 final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SPUStandardUserDriverDelegate {
     private var notchPanel: NotchPanel?
     private let windowHeight: CGFloat = 500
+    private let integrationCoordinator = IntegrationCoordinator.shared
 
     private var updaterStarted = false
     private var temporarilyRegularForUpdateSession = false
@@ -38,8 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
         guard !isRunningTests else { return }
 
         NSApplication.shared.setActivationPolicy(.accessory)
-        let claudeConfig = ClaudeConfigDirectoryResolver.resolve()
-        ConversationParser.configureProjectsRootPath(using: claudeConfig)
+        integrationCoordinator.prepareForLaunch()
         setupNotchWindow()
         observeScreenChanges()
         observeWakeNotifications()
@@ -49,11 +49,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
     }
 
     private func startHookServices() {
-        HookInstaller.installIfNeeded()
-        SocketServer.shared.start { event in
-            Task { @MainActor in
-                NotchiStateMachine.shared.handleEvent(event)
-            }
+        integrationCoordinator.installHooksIfNeeded()
+        integrationCoordinator.start { event in
+            NotchiStateMachine.shared.handleEvent(event)
         }
     }
 
@@ -62,7 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        SocketServer.shared.stop()
+        integrationCoordinator.stop()
         ClaudeUsageService.shared.stopPolling()
     }
 

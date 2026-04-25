@@ -4,10 +4,11 @@ struct SessionRowView: View {
     let session: SessionData
     let title: String
     let isSelected: Bool
+    let isHovered: Bool
     let onTap: () -> Void
+    let onHover: (Bool) -> Void
     let onDelete: () -> Void
 
-    @State private var isRowHovered = false
     @State private var isTrashHovered = false
 
     var body: some View {
@@ -21,6 +22,7 @@ struct SessionRowView: View {
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(TerminalColors.primaryText)
                         .lineLimit(1)
+                        .layoutPriority(1)
 
                     if let preview = session.activityPreview {
                         Text(preview)
@@ -46,17 +48,17 @@ struct SessionRowView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .contentShape(Rectangle())
-            .background(isSelected || isRowHovered ? TerminalColors.hoverBackground : Color.clear)
+            .background(isSelected || isHovered ? TerminalColors.hoverBackground : Color.clear)
             .cornerRadius(6)
         }
         .buttonStyle(.plain)
-        .onHover { isRowHovered = $0 }
+        .onHover(perform: onHover)
     }
 
     @ViewBuilder
     private var stateIndicator: some View {
         if session.isProcessing {
-            ProcessingSpinner()
+            ProcessingSpinner(color: providerAccentColor)
         } else {
             Circle()
                 .fill(stateColor)
@@ -68,6 +70,6 @@ struct SessionRowView: View {
     }
 
     private var providerAccentColor: Color {
-        TerminalColors.claudeOrange
+        session.provider.accentColor
     }
 }
