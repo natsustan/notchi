@@ -231,6 +231,53 @@ final class NotchiStateMachineTests: XCTestCase {
         XCTAssertEqual(session.recentEvents.first?.status, .success)
     }
 
+    func testCodexCLISessionEndsAfterProcessMisses() {
+        let stateMachine = NotchiStateMachine.shared
+        stateMachine.isCodexProcessAlive = { _ in false }
+        let sessionId = "codex-cli-exit-\(UUID().uuidString)"
+        let sessionKey = ProviderSessionKey(provider: .codex, rawSessionId: sessionId)
+
+        stateMachine.handleEvent(makeEvent(
+            sessionId: sessionId,
+            provider: .codex,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "hello",
+            codexProcessId: 12345,
+            codexOrigin: .cli
+        ))
+
+        XCTAssertNotNil(SessionStore.shared.session(for: sessionKey))
+
+        stateMachine.reconcileCodexProcessLivenessForTesting()
+        XCTAssertNotNil(SessionStore.shared.session(for: sessionKey))
+
+        stateMachine.reconcileCodexProcessLivenessForTesting()
+        XCTAssertNil(SessionStore.shared.session(for: sessionKey))
+    }
+
+    func testCodexDesktopSessionIsNotRemovedByProcessMonitor() {
+        let stateMachine = NotchiStateMachine.shared
+        stateMachine.isCodexProcessAlive = { _ in false }
+        let sessionId = "codex-desktop-\(UUID().uuidString)"
+        let sessionKey = ProviderSessionKey(provider: .codex, rawSessionId: sessionId)
+
+        stateMachine.handleEvent(makeEvent(
+            sessionId: sessionId,
+            provider: .codex,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "hello",
+            codexProcessId: 12345,
+            codexOrigin: .desktop
+        ))
+
+        stateMachine.reconcileCodexProcessLivenessForTesting()
+        stateMachine.reconcileCodexProcessLivenessForTesting()
+
+        XCTAssertNotNil(SessionStore.shared.session(for: sessionKey))
+    }
+
     private func makeInteractiveSession(sessionId: String) -> SessionData {
         SessionStore.shared.process(makeEvent(
             sessionId: sessionId,
@@ -250,7 +297,9 @@ final class NotchiStateMachineTests: XCTestCase {
         event: NormalizedAgentEvent,
         status: String,
         userPrompt: String? = nil,
-        interactive: Bool = true
+        interactive: Bool = true,
+        codexProcessId: Int? = nil,
+        codexOrigin: CodexOrigin? = nil
     ) -> HookEvent {
         HookEvent(
             provider: provider,
@@ -264,7 +313,9 @@ final class NotchiStateMachineTests: XCTestCase {
             toolUseId: nil,
             userPrompt: userPrompt,
             permissionMode: nil,
-            interactive: interactive
+            interactive: interactive,
+            codexProcessId: codexProcessId,
+            codexOrigin: codexOrigin
         )
     }
 }

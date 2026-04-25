@@ -81,6 +81,8 @@ final class SessionStore {
             session.updatePermissionMode(mode)
         }
 
+        session.updateCodexRuntime(processId: event.codexProcessId, origin: event.codexOrigin)
+
         switch event.event {
         case .userPromptSubmitted:
             if let prompt = event.userPrompt {

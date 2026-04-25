@@ -36,6 +36,8 @@ final class SessionData: Identifiable {
     private(set) var permissionMode: String = "default"
     private(set) var pendingQuestions: [PendingQuestion] = []
     private(set) var currentSpinnerVerb: String = SpinnerVerbs.randomWorkingVerb()
+    private(set) var codexProcessId: Int?
+    private(set) var codexOrigin: CodexOrigin?
 
     private var durationTimer: Task<Void, Never>?
     private var sleepTimer: Task<Void, Never>?
@@ -67,6 +69,10 @@ final class SessionData: Identifiable {
             return String(lastMessage.text.prefix(50))
         }
         return nil
+    }
+
+    var isCodexCLIProcessBacked: Bool {
+        provider == .codex && codexOrigin == .cli && codexProcessId != nil
     }
 
     // Sprite positioning constants (normalized 0..1 range for X, points for Y)
@@ -186,6 +192,18 @@ final class SessionData: Identifiable {
 
     func updatePermissionMode(_ mode: String) {
         permissionMode = mode
+    }
+
+    func updateCodexRuntime(processId: Int?, origin: CodexOrigin?) {
+        guard provider == .codex else { return }
+
+        if let processId, processId > 0 {
+            codexProcessId = processId
+        }
+
+        if let origin {
+            codexOrigin = origin
+        }
     }
 
     func setPendingQuestions(_ questions: [PendingQuestion]) {

@@ -39,6 +39,8 @@ final class AgentProviderAdapterTests: XCTestCase {
             "status": "processing",
             "transcript_path": "/tmp/codex-rollout.jsonl",
             "user_prompt": "hello",
+            "codex_process_id": 12345,
+            "codex_origin": "cli",
         ])
         let envelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: data)
 
@@ -48,6 +50,8 @@ final class AgentProviderAdapterTests: XCTestCase {
         XCTAssertEqual(event?.event, .userPromptSubmitted)
         XCTAssertEqual(event?.userPrompt, "hello")
         XCTAssertEqual(event?.sessionId, "codex:codex-session")
+        XCTAssertEqual(event?.codexProcessId, 12345)
+        XCTAssertEqual(event?.codexOrigin, .cli)
     }
 
     func testCodexAdapterDropsUnsupportedEnvelope() throws {

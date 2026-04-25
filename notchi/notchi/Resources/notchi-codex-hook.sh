@@ -7,7 +7,9 @@ SOCKET_PATH="/tmp/notchi.sock"
 
 /usr/bin/python3 -c "
 import json
+import os
 import socket
+import subprocess
 import sys
 
 try:
@@ -32,6 +34,67 @@ output = {
     'permission_mode': input_data.get('permission_mode'),
     'interactive': True,
 }
+
+def process_table():
+    try:
+        ps_output = subprocess.check_output(
+            ['/bin/ps', '-axo', 'pid=,ppid=,tty=,comm='],
+            text=True,
+            timeout=0.5,
+        )
+    except Exception:
+        return {}
+
+    table = {}
+    for line in ps_output.splitlines():
+        parts = line.strip().split(None, 3)
+        if len(parts) < 4 or not parts[0].isdigit() or not parts[1].isdigit():
+            continue
+
+        table[int(parts[0])] = {
+            'ppid': int(parts[1]),
+            'tty': parts[2],
+            'command': os.path.basename(parts[3]).lower(),
+        }
+
+    return table
+
+def codex_process_context():
+    processes = process_table()
+    pid = os.getppid()
+    fallback = None
+    visited = set()
+
+    for _ in range(8):
+        if pid in visited:
+            break
+
+        visited.add(pid)
+        info = processes.get(pid)
+        if info is None:
+            break
+
+        origin = 'cli' if info['tty'] != '??' else 'desktop'
+
+        if 'codex' in info['command']:
+            return (pid, origin)
+
+        if fallback is None:
+            # Known limitation: if Codex is hidden behind a differently named long-lived wrapper,
+            # this fallback may track the wrapper/shell and leave the session visible longer.
+            fallback = (pid, origin)
+
+        if info['ppid'] <= 1 or info['ppid'] == pid:
+            break
+
+        pid = info['ppid']
+
+    return fallback
+
+context = codex_process_context()
+if context:
+    output['codex_process_id'] = context[0]
+    output['codex_origin'] = context[1]
 
 prompt = input_data.get('prompt')
 if prompt:

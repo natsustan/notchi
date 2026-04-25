@@ -29,6 +29,11 @@ enum NormalizedAgentEvent: String, CaseIterable, Codable, Sendable {
     }
 }
 
+enum CodexOrigin: String, Codable, Sendable {
+    case cli
+    case desktop
+}
+
 struct AgentHookEnvelope: Decodable, Sendable {
     let provider: AgentProvider
     let sessionId: String
@@ -42,6 +47,8 @@ struct AgentHookEnvelope: Decodable, Sendable {
     let userPrompt: String?
     let permissionMode: String?
     let interactive: Bool?
+    let codexProcessId: Int?
+    let codexOrigin: CodexOrigin?
 
     enum CodingKeys: String, CodingKey {
         case provider
@@ -53,6 +60,8 @@ struct AgentHookEnvelope: Decodable, Sendable {
         case userPrompt = "user_prompt"
         case permissionMode = "permission_mode"
         case interactive
+        case codexProcessId = "codex_process_id"
+        case codexOrigin = "codex_origin"
     }
 
     nonisolated init(from decoder: Decoder) throws {
@@ -70,6 +79,8 @@ struct AgentHookEnvelope: Decodable, Sendable {
         userPrompt = try container.decodeIfPresent(String.self, forKey: .userPrompt)
         permissionMode = try container.decodeIfPresent(String.self, forKey: .permissionMode)
         interactive = try container.decodeIfPresent(Bool.self, forKey: .interactive)
+        codexProcessId = try container.decodeIfPresent(Int.self, forKey: .codexProcessId)
+        codexOrigin = try container.decodeIfPresent(CodexOrigin.self, forKey: .codexOrigin)
     }
 }
 
@@ -86,6 +97,8 @@ struct HookEvent: Sendable {
     let userPrompt: String?
     let permissionMode: String?
     let interactive: Bool?
+    let codexProcessId: Int?
+    let codexOrigin: CodexOrigin?
 
     nonisolated var sessionId: String {
         sessionKey.stableId
@@ -107,7 +120,9 @@ struct HookEvent: Sendable {
         toolUseId: String? = nil,
         userPrompt: String? = nil,
         permissionMode: String? = nil,
-        interactive: Bool? = nil
+        interactive: Bool? = nil,
+        codexProcessId: Int? = nil,
+        codexOrigin: CodexOrigin? = nil
     ) {
         self.provider = provider
         self.sessionKey = ProviderSessionKey(provider: provider, rawSessionId: rawSessionId)
@@ -121,6 +136,8 @@ struct HookEvent: Sendable {
         self.userPrompt = userPrompt
         self.permissionMode = permissionMode
         self.interactive = interactive
+        self.codexProcessId = codexProcessId
+        self.codexOrigin = codexOrigin
     }
 }
 

@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 import os.log
 
 private let logger = Logger(subsystem: "com.ruban.notchi", category: "StateMachine")
@@ -14,19 +15,25 @@ final class NotchiStateMachine {
     private var pendingSyncTasks: [ProviderSessionKey: Task<Void, Never>] = [:]
     private var pendingPositionMarks: [ProviderSessionKey: Task<Void, Never>] = [:]
     private var pendingCodexSessionStartTimes: [ProviderSessionKey: Date] = [:]
+    private var codexProcessMonitorTask: Task<Void, Never>?
+    private var codexProcessMissCounts: [ProviderSessionKey: Int] = [:]
     private var fileWatchers: [ProviderSessionKey: (source: DispatchSourceFileSystemObject, fd: Int32)] = [:]
     var handleClaudeUsageResumeTrigger: (ClaudeUsageResumeTrigger) -> Void = { trigger in
         ClaudeUsageService.shared.handleClaudeResumeTrigger(trigger)
     }
+    var isCodexProcessAlive: (Int) -> Bool
 
     private static let syncDebounce: Duration = .milliseconds(100)
     private static let waitingClearGuard: TimeInterval = 2.0
+    private static let codexProcessMonitorInterval: Duration = .seconds(2)
+    private static let codexProcessMissLimit = 2
 
     var currentState: NotchiState {
         sessionStore.effectiveSession?.state ?? .idle
     }
 
     private init() {
+        isCodexProcessAlive = Self.defaultCodexProcessAlive
         startEmotionDecayTimer()
     }
 
@@ -57,6 +64,7 @@ final class NotchiStateMachine {
 
         let sessionStartTimeOverride = pendingSessionStartTimeOverride(for: event)
         let session = sessionStore.process(event, sessionStartTimeOverride: sessionStartTimeOverride)
+        refreshCodexProcessMonitoring()
 
         switch event.event {
         case .userPromptSubmitted:
@@ -138,6 +146,7 @@ final class NotchiStateMachine {
             if sessionStore.activeSessionCount == 0 {
                 logger.info("Global state: idle")
             }
+            refreshCodexProcessMonitoring()
             return
 
         default:
@@ -251,6 +260,52 @@ final class NotchiStateMachine {
         }
     }
 
+    private func reconcileCodexProcessLiveness() {
+        let trackedSessions = sessionStore.sessions.values.filter { $0.isCodexCLIProcessBacked }
+        let trackedKeys = Set(trackedSessions.map(\.sessionKey))
+        codexProcessMissCounts = codexProcessMissCounts.filter { trackedKeys.contains($0.key) }
+
+        var endedSessions: [SessionData] = []
+
+        for session in trackedSessions {
+            guard let processId = session.codexProcessId else { continue }
+
+            if isCodexProcessAlive(processId) {
+                codexProcessMissCounts.removeValue(forKey: session.sessionKey)
+                continue
+            }
+
+            let missCount = (codexProcessMissCounts[session.sessionKey] ?? 0) + 1
+            codexProcessMissCounts[session.sessionKey] = missCount
+
+            if missCount >= Self.codexProcessMissLimit {
+                endedSessions.append(session)
+            }
+        }
+
+        for session in endedSessions {
+            logger.info(
+                "Codex CLI process \(session.codexProcessId ?? -1, privacy: .public) exited; ending session \(session.sessionKey.stableId, privacy: .public)"
+            )
+            codexProcessMissCounts.removeValue(forKey: session.sessionKey)
+            handleEvent(
+                HookEvent(
+                    provider: .codex,
+                    rawSessionId: session.rawSessionId,
+                    transcriptPath: nil,
+                    cwd: session.cwd,
+                    event: .sessionEnded,
+                    status: "ended",
+                    interactive: session.isInteractive,
+                    codexProcessId: session.codexProcessId,
+                    codexOrigin: session.codexOrigin
+                )
+            )
+        }
+
+        refreshCodexProcessMonitoring()
+    }
+
     private func startFileWatcher(sessionKey: ProviderSessionKey, transcriptPath: String) {
         stopFileWatcher(sessionKey: sessionKey)
 
@@ -297,10 +352,47 @@ final class NotchiStateMachine {
         }
     }
 
+    private func refreshCodexProcessMonitoring() {
+        let shouldMonitor = sessionStore.sessions.values.contains { $0.isCodexCLIProcessBacked }
+
+        if shouldMonitor {
+            guard codexProcessMonitorTask == nil else { return }
+            codexProcessMonitorTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: Self.codexProcessMonitorInterval)
+                    guard !Task.isCancelled else { return }
+                    self?.reconcileCodexProcessLiveness()
+                }
+            }
+        } else {
+            codexProcessMonitorTask?.cancel()
+            codexProcessMonitorTask = nil
+            codexProcessMissCounts.removeAll()
+        }
+    }
+
+    private nonisolated static func defaultCodexProcessAlive(_ processId: Int) -> Bool {
+        guard processId > 0, processId <= Int(Int32.max) else { return false }
+
+        errno = 0
+        let result = kill(pid_t(processId), 0)
+        return result == 0 || errno == EPERM
+    }
+
     func resetTestingHooks() {
         handleClaudeUsageResumeTrigger = { trigger in
             ClaudeUsageService.shared.handleClaudeResumeTrigger(trigger)
         }
+        isCodexProcessAlive = Self.defaultCodexProcessAlive
+        codexProcessMonitorTask?.cancel()
+        codexProcessMonitorTask = nil
+        codexProcessMissCounts.removeAll()
     }
+
+#if DEBUG
+    func reconcileCodexProcessLivenessForTesting() {
+        reconcileCodexProcessLiveness()
+    }
+#endif
 
 }

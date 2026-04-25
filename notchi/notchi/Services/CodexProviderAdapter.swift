@@ -46,7 +46,9 @@ struct CodexProviderAdapter: AgentProviderAdapter {
             toolUseId: envelope.toolUseId,
             userPrompt: envelope.userPrompt,
             permissionMode: envelope.permissionMode,
-            interactive: envelope.interactive ?? true
+            interactive: envelope.interactive ?? true,
+            codexProcessId: envelope.codexProcessId,
+            codexOrigin: envelope.codexOrigin
         )
     }
 
