@@ -16,6 +16,10 @@ final class NotchiStateMachine {
     private var pendingPositionMarks: [ProviderSessionKey: Task<Void, Never>] = [:]
     private var pendingCodexSessionStartTimes: [ProviderSessionKey: Date] = [:]
     private var codexProcessMonitorTask: Task<Void, Never>?
+    private var codexThreadMetadataMonitorTask: Task<Void, Never>?
+    private var codexThreadMetadataRefreshTask: Task<Void, Never>?
+    private var codexThreadMetadataImmediateRefreshKeys: Set<ProviderSessionKey> = []
+    private var codexThreadMetadataAutoRefreshEnabled = true
     private var codexProcessMissCounts: [ProviderSessionKey: Int] = [:]
     private var fileWatchers: [ProviderSessionKey: (source: DispatchSourceFileSystemObject, fd: Int32)] = [:]
     var handleClaudeUsageResumeTrigger: (ClaudeUsageResumeTrigger) -> Void = { trigger in
@@ -26,6 +30,7 @@ final class NotchiStateMachine {
     private static let syncDebounce: Duration = .milliseconds(100)
     private static let waitingClearGuard: TimeInterval = 2.0
     private static let codexProcessMonitorInterval: Duration = .seconds(2)
+    private static let codexThreadMetadataMonitorInterval: Duration = .seconds(5)
     private static let codexProcessMissLimit = 2
 
     var currentState: NotchiState {
@@ -65,6 +70,13 @@ final class NotchiStateMachine {
         let sessionStartTimeOverride = pendingSessionStartTimeOverride(for: event)
         let session = sessionStore.process(event, sessionStartTimeOverride: sessionStartTimeOverride)
         refreshCodexProcessMonitoring()
+        refreshCodexThreadMetadataMonitoring()
+        scheduleInitialCodexThreadMetadataRefreshIfNeeded(for: event)
+
+        if event.event != .sessionEnded, session.codexArchived {
+            endCodexArchivedSessions([session])
+            return
+        }
 
         switch event.event {
         case .userPromptSubmitted:
@@ -138,6 +150,7 @@ final class NotchiStateMachine {
 
         case .sessionEnded:
             pendingCodexSessionStartTimes.removeValue(forKey: event.sessionKey)
+            codexThreadMetadataImmediateRefreshKeys.remove(event.sessionKey)
             stopFileWatcher(sessionKey: event.sessionKey)
             pendingSyncTasks.removeValue(forKey: event.sessionKey)?.cancel()
             pendingPositionMarks.removeValue(forKey: event.sessionKey)?.cancel()
@@ -147,6 +160,7 @@ final class NotchiStateMachine {
                 logger.info("Global state: idle")
             }
             refreshCodexProcessMonitoring()
+            refreshCodexThreadMetadataMonitoring()
             return
 
         default:
@@ -306,6 +320,33 @@ final class NotchiStateMachine {
         refreshCodexProcessMonitoring()
     }
 
+    private func reconcileCodexThreadMetadata() {
+        scheduleCodexThreadMetadataRefresh()
+    }
+
+    private func endCodexArchivedSessions(_ sessions: [SessionData]) {
+        for session in sessions {
+            logger.info(
+                "Codex thread archived; ending session \(session.sessionKey.stableId, privacy: .public)"
+            )
+            // WHY: Route archive removal through the normal SessionEnd path so
+            // watcher/parser/sound cleanup stays identical to a real end event.
+            handleEvent(
+                HookEvent(
+                    provider: .codex,
+                    rawSessionId: session.rawSessionId,
+                    transcriptPath: nil,
+                    cwd: session.cwd,
+                    event: .sessionEnded,
+                    status: "ended",
+                    interactive: session.isInteractive,
+                    codexProcessId: session.codexProcessId,
+                    codexOrigin: session.codexOrigin
+                )
+            )
+        }
+    }
+
     private func startFileWatcher(sessionKey: ProviderSessionKey, transcriptPath: String) {
         stopFileWatcher(sessionKey: sessionKey)
 
@@ -371,6 +412,61 @@ final class NotchiStateMachine {
         }
     }
 
+    private func refreshCodexThreadMetadataMonitoring() {
+        let shouldMonitor = sessionStore.sessions.values.contains { $0.isCodexThreadBacked }
+
+        if shouldMonitor {
+            guard codexThreadMetadataMonitorTask == nil else { return }
+            codexThreadMetadataMonitorTask = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: Self.codexThreadMetadataMonitorInterval)
+                    guard !Task.isCancelled else { return }
+                    self?.reconcileCodexThreadMetadata()
+                }
+            }
+        } else {
+            codexThreadMetadataMonitorTask?.cancel()
+            codexThreadMetadataMonitorTask = nil
+            codexThreadMetadataRefreshTask?.cancel()
+            codexThreadMetadataRefreshTask = nil
+            codexThreadMetadataImmediateRefreshKeys.removeAll()
+        }
+    }
+
+    private func scheduleInitialCodexThreadMetadataRefreshIfNeeded(for event: HookEvent) {
+        guard codexThreadMetadataAutoRefreshEnabled,
+              event.provider == .codex,
+              event.transcriptPath != nil,
+              !codexThreadMetadataImmediateRefreshKeys.contains(event.sessionKey) else {
+            return
+        }
+
+        codexThreadMetadataImmediateRefreshKeys.insert(event.sessionKey)
+        scheduleCodexThreadMetadataRefresh()
+    }
+
+    private func scheduleCodexThreadMetadataRefresh() {
+        guard codexThreadMetadataRefreshTask == nil else { return }
+
+        let requests = sessionStore.codexThreadMetadataRequests()
+        guard !requests.isEmpty else {
+            refreshCodexThreadMetadataMonitoring()
+            return
+        }
+
+        codexThreadMetadataRefreshTask = Task { [weak self] in
+            guard let self else { return }
+            defer { self.codexThreadMetadataRefreshTask = nil }
+
+            let updates = await self.sessionStore.resolveCodexThreadMetadata(requests)
+            guard !Task.isCancelled else { return }
+
+            let archivedSessions = self.sessionStore.applyCodexThreadMetadata(updates)
+            self.endCodexArchivedSessions(archivedSessions)
+            self.refreshCodexThreadMetadataMonitoring()
+        }
+    }
+
     private nonisolated static func defaultCodexProcessAlive(_ processId: Int) -> Bool {
         guard processId > 0, processId <= Int(Int32.max) else { return false }
 
@@ -386,12 +482,28 @@ final class NotchiStateMachine {
         isCodexProcessAlive = Self.defaultCodexProcessAlive
         codexProcessMonitorTask?.cancel()
         codexProcessMonitorTask = nil
+        codexThreadMetadataMonitorTask?.cancel()
+        codexThreadMetadataMonitorTask = nil
+        codexThreadMetadataRefreshTask?.cancel()
+        codexThreadMetadataRefreshTask = nil
+        codexThreadMetadataImmediateRefreshKeys.removeAll()
+        codexThreadMetadataAutoRefreshEnabled = true
         codexProcessMissCounts.removeAll()
     }
 
 #if DEBUG
     func reconcileCodexProcessLivenessForTesting() {
         reconcileCodexProcessLiveness()
+    }
+
+    func reconcileCodexThreadMetadataForTesting() {
+        let archivedSessions = sessionStore.refreshCodexThreadMetadataForTesting()
+        endCodexArchivedSessions(archivedSessions)
+        refreshCodexThreadMetadataMonitoring()
+    }
+
+    func setCodexThreadMetadataAutoRefreshEnabledForTesting(_ enabled: Bool) {
+        codexThreadMetadataAutoRefreshEnabled = enabled
     }
 #endif
 

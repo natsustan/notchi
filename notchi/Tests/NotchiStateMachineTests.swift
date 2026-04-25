@@ -8,6 +8,7 @@ final class NotchiStateMachineTests: XCTestCase {
         let sessionKeys = Array(SessionStore.shared.sessions.keys)
         sessionKeys.forEach { SessionStore.shared.dismissSession($0) }
         NotchiStateMachine.shared.resetTestingHooks()
+        SessionStore.shared.resetTestingHooks()
         try await super.tearDown()
     }
 
@@ -278,6 +279,68 @@ final class NotchiStateMachineTests: XCTestCase {
         XCTAssertNotNil(SessionStore.shared.session(for: sessionKey))
     }
 
+    func testArchivedCodexThreadRemovesSessionOnMetadataReconcile() {
+        let stateMachine = NotchiStateMachine.shared
+        stateMachine.setCodexThreadMetadataAutoRefreshEnabledForTesting(false)
+        let sessionId = "codex-archived-\(UUID().uuidString)"
+        let sessionKey = ProviderSessionKey(provider: .codex, rawSessionId: sessionId)
+        SessionStore.shared.setCodexMetadataResolverForTesting { _ in
+            CodexThreadMetadata(title: "Archived chat", archived: true)
+        }
+
+        stateMachine.handleEvent(makeEvent(
+            sessionId: sessionId,
+            provider: .codex,
+            transcriptPath: "/tmp/archived-rollout.jsonl",
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "hello"
+        ))
+
+        XCTAssertNotNil(SessionStore.shared.session(for: sessionKey))
+
+        stateMachine.reconcileCodexThreadMetadataForTesting()
+
+        XCTAssertNil(SessionStore.shared.session(for: sessionKey))
+        XCTAssertEqual(SessionStore.shared.activeSessionCount, 0)
+    }
+
+    func testCodexThreadMetadataReconcileRefreshesTitleAndRemovesArchivedSession() {
+        let stateMachine = NotchiStateMachine.shared
+        stateMachine.setCodexThreadMetadataAutoRefreshEnabledForTesting(false)
+        let sessionId = "codex-archive-refresh-\(UUID().uuidString)"
+        let sessionKey = ProviderSessionKey(provider: .codex, rawSessionId: sessionId)
+        let transcriptPath = "/tmp/archive-refresh-rollout.jsonl"
+        SessionStore.shared.setCodexMetadataResolverForTesting { _ in
+            CodexThreadMetadata(title: "Initial title", archived: false)
+        }
+
+        stateMachine.handleEvent(makeEvent(
+            sessionId: sessionId,
+            provider: .codex,
+            transcriptPath: transcriptPath,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "hello"
+        ))
+
+        XCTAssertNil(SessionStore.shared.session(for: sessionKey)?.codexTitle)
+
+        stateMachine.reconcileCodexThreadMetadataForTesting()
+
+        XCTAssertEqual(SessionStore.shared.session(for: sessionKey)?.codexTitle, "Initial title")
+
+        SessionStore.shared.setCodexMetadataResolverForTesting { path in
+            path == transcriptPath
+                ? CodexThreadMetadata(title: "Archived title", archived: true)
+                : nil
+        }
+
+        stateMachine.reconcileCodexThreadMetadataForTesting()
+
+        XCTAssertNil(SessionStore.shared.session(for: sessionKey))
+    }
+
     private func makeInteractiveSession(sessionId: String) -> SessionData {
         SessionStore.shared.process(makeEvent(
             sessionId: sessionId,
@@ -294,6 +357,7 @@ final class NotchiStateMachineTests: XCTestCase {
     private func makeEvent(
         sessionId: String,
         provider: AgentProvider = .claude,
+        transcriptPath: String? = nil,
         event: NormalizedAgentEvent,
         status: String,
         userPrompt: String? = nil,
@@ -304,7 +368,7 @@ final class NotchiStateMachineTests: XCTestCase {
         HookEvent(
             provider: provider,
             rawSessionId: sessionId,
-            transcriptPath: nil,
+            transcriptPath: transcriptPath,
             cwd: "/tmp",
             event: event,
             status: status,

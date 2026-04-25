@@ -6,6 +6,7 @@ final class SessionStoreTests: XCTestCase {
     override func tearDown() async throws {
         let sessionKeys = Array(SessionStore.shared.sessions.keys)
         sessionKeys.forEach { SessionStore.shared.dismissSession($0) }
+        SessionStore.shared.resetTestingHooks()
         try await super.tearDown()
     }
 
@@ -114,10 +115,69 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNotNil(store.sessions[codex.sessionKey])
     }
 
+    func testCodexDisplayTitlePrefersCodexThreadTitle() {
+        let store = SessionStore.shared
+        store.setCodexMetadataResolverForTesting { transcriptPath in
+            transcriptPath == "/tmp/rollout.jsonl"
+                ? CodexThreadMetadata(title: "Review uncommitted changes", archived: false)
+                : nil
+        }
+
+        let session = store.process(makeEvent(
+            sessionId: "codex-title-\(UUID().uuidString)",
+            provider: .codex,
+            cwd: "/tmp/notchi",
+            transcriptPath: "/tmp/rollout.jsonl",
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "raw prompt"
+        ))
+
+        XCTAssertEqual(session.codexTranscriptPath, "/tmp/rollout.jsonl")
+        XCTAssertFalse(session.codexArchived)
+        XCTAssertNil(session.codexTitle)
+
+        _ = store.refreshCodexThreadMetadataForTesting()
+
+        XCTAssertEqual(session.codexTitle, "Review uncommitted changes")
+        XCTAssertEqual(store.displayTitle(for: session), "notchi #1 - Review uncommitted changes")
+    }
+
+    func testRefreshCodexThreadMetadataReturnsArchivedSessionsAndUpdatesTitle() {
+        let store = SessionStore.shared
+        let transcriptPath = "/tmp/archived-rollout.jsonl"
+        store.setCodexMetadataResolverForTesting { _ in
+            CodexThreadMetadata(title: "Initial title", archived: false)
+        }
+
+        let session = store.process(makeEvent(
+            sessionId: "codex-archived-title-\(UUID().uuidString)",
+            provider: .codex,
+            cwd: "/tmp/notchi",
+            transcriptPath: transcriptPath,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "raw prompt"
+        ))
+
+        store.setCodexMetadataResolverForTesting { path in
+            path == transcriptPath
+                ? CodexThreadMetadata(title: "Archived title", archived: true)
+                : nil
+        }
+
+        let archivedSessions = store.refreshCodexThreadMetadataForTesting()
+
+        XCTAssertEqual(archivedSessions.map(\.sessionKey), [session.sessionKey])
+        XCTAssertEqual(session.codexTitle, "Archived title")
+        XCTAssertTrue(session.codexArchived)
+    }
+
     private func makeEvent(
         sessionId: String,
         provider: AgentProvider = .claude,
         cwd: String = "/tmp",
+        transcriptPath: String? = nil,
         event: NormalizedAgentEvent,
         status: String,
         userPrompt: String? = nil,
@@ -127,7 +187,7 @@ final class SessionStoreTests: XCTestCase {
         HookEvent(
             provider: provider,
             rawSessionId: sessionId,
-            transcriptPath: nil,
+            transcriptPath: transcriptPath,
             cwd: cwd,
             event: event,
             status: status,

@@ -38,6 +38,9 @@ final class SessionData: Identifiable {
     private(set) var currentSpinnerVerb: String = SpinnerVerbs.randomWorkingVerb()
     private(set) var codexProcessId: Int?
     private(set) var codexOrigin: CodexOrigin?
+    private(set) var codexTitle: String?
+    private(set) var codexTranscriptPath: String?
+    private(set) var codexArchived: Bool = false
 
     private var durationTimer: Task<Void, Never>?
     private var sleepTimer: Task<Void, Never>?
@@ -73,6 +76,10 @@ final class SessionData: Identifiable {
 
     var isCodexCLIProcessBacked: Bool {
         provider == .codex && codexOrigin == .cli && codexProcessId != nil
+    }
+
+    var isCodexThreadBacked: Bool {
+        provider == .codex && codexTranscriptPath != nil
     }
 
     // Sprite positioning constants (normalized 0..1 range for X, points for Y)
@@ -204,6 +211,27 @@ final class SessionData: Identifiable {
         if let origin {
             codexOrigin = origin
         }
+    }
+
+    func updateCodexTitle(_ title: String?) {
+        guard provider == .codex,
+              let title = title?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !title.isEmpty else { return }
+
+        codexTitle = title.truncatedForPrompt()
+    }
+
+    func updateCodexThreadMetadata(transcriptPath: String, metadata: CodexThreadMetadata?) {
+        guard provider == .codex else { return }
+
+        let trimmedPath = transcriptPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else { return }
+
+        codexTranscriptPath = trimmedPath
+
+        guard let metadata else { return }
+        updateCodexTitle(metadata.title)
+        codexArchived = metadata.archived
     }
 
     func setPendingQuestions(_ questions: [PendingQuestion]) {

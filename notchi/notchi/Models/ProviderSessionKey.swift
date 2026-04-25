@@ -1,6 +1,6 @@
 import Foundation
 
-struct ProviderSessionKey: Hashable, Sendable {
+nonisolated struct ProviderSessionKey: Hashable, Sendable {
     let provider: AgentProvider
     let rawSessionId: String
 
