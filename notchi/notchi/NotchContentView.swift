@@ -294,6 +294,7 @@ struct NotchContentView: View {
                     ExpandedPanelView(
                         sessionStore: sessionStore,
                         usageService: usageService,
+                        codexUsageService: CodexUsageService.shared,
                         showingSettings: $showingPanelSettings,
                         showingSessionActivity: $showingSessionActivity,
                         isActivityCollapsed: $isActivityCollapsed

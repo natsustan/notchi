@@ -645,6 +645,7 @@ final class ClaudeUsageService {
     var statusMessage: String?
     var isConnected = false
     var isUsageStale = false
+    var lastObservedAt: Date?
     var recoveryAction: ClaudeUsageRecoveryAction = .none
 
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage")!
@@ -1202,6 +1203,7 @@ final class ClaudeUsageService {
             preferHeadersFallback = false
             clearTransientState()
             currentUsage = usageResponse.fiveHour
+            lastObservedAt = usageResponse.fiveHour == nil ? nil : dependencies.now()
             reconcileExtraUsageState(
                 with: usageResponse.extraUsage,
                 usage: usageResponse.fiveHour
@@ -1296,6 +1298,7 @@ final class ClaudeUsageService {
             let usage = QuotaPeriod(utilization: (utilization * 100).rounded(), resetDate: resetDate)
             isConnected = true
             currentUsage = usage
+            lastObservedAt = dependencies.now()
             reconcileExtraUsageStateForHeaders(using: usage)
 
             switch context {
@@ -1856,6 +1859,7 @@ final class ClaudeUsageService {
         }
 
         currentUsage = isUsageStillValid(snapshot.lastGoodUsage, now: now) ? snapshot.lastGoodUsage : nil
+        lastObservedAt = currentUsage == nil ? nil : now
         currentExtraUsage = snapshot.lastGoodExtraUsage
         lastObservedExtraUsageCredits = snapshot.lastObservedExtraUsageCredits
         extraUsageResetMarker = snapshot.extraUsageResetMarker

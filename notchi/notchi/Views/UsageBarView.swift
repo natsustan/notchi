@@ -8,6 +8,8 @@ struct UsageBarView: View {
     let statusMessage: String?
     let isStale: Bool
     let recoveryAction: ClaudeUsageRecoveryAction
+    let label: String
+    var resetLabelPrefix: String?
     var compact: Bool = false
     var isEnabled: Bool = AppSettings.isUsageEnabled
     var onConnect: (() -> Void)?
@@ -21,6 +23,8 @@ struct UsageBarView: View {
         statusMessage: String?,
         isStale: Bool,
         recoveryAction: ClaudeUsageRecoveryAction,
+        label: String = "Claude Usage",
+        resetLabelPrefix: String? = nil,
         compact: Bool = false,
         isEnabled: Bool = AppSettings.isUsageEnabled,
         onConnect: (() -> Void)? = nil,
@@ -33,6 +37,8 @@ struct UsageBarView: View {
         self.statusMessage = statusMessage
         self.isStale = isStale
         self.recoveryAction = recoveryAction
+        self.label = label
+        self.resetLabelPrefix = resetLabelPrefix
         self.compact = compact
         self.isEnabled = isEnabled
         self.onConnect = onConnect
@@ -88,6 +94,13 @@ struct UsageBarView: View {
         }
     }
 
+    func resetLabelText(for resetTime: String) -> String {
+        if let resetLabelPrefix {
+            return "\(resetLabelPrefix) resets in \(resetTime)"
+        }
+        return "Resets in \(resetTime)"
+    }
+
     var body: some View {
         if shouldShowConnectPlaceholder {
             Button(action: { onConnect?() }) {
@@ -125,7 +138,7 @@ struct UsageBarView: View {
                     }
                 } else if let usage, let resetTime = usage.formattedResetTime {
                     HStack(alignment: .center, spacing: 4) {
-                        Text("Resets in \(resetTime)")
+                        Text(resetLabelText(for: resetTime))
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(TerminalColors.secondaryText)
                             .lineLimit(1)
@@ -142,7 +155,7 @@ struct UsageBarView: View {
                         .font(.system(size: 10))
                         .foregroundColor(TerminalColors.dimmedText)
                 } else {
-                    Text("Claude Usage")
+                    Text(label)
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(TerminalColors.secondaryText)
                 }

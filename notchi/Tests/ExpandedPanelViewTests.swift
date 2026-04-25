@@ -15,10 +15,10 @@ final class ExpandedPanelViewTests: XCTestCase {
         )
     }
 
-    func testSharedUsageBarHidesWhenOnlyCodexSessionsAreActive() {
+    func testSharedUsageBarStaysVisibleWhenOnlyCodexSessionsAreActive() {
         let codex = SessionData(sessionId: "codex-session", provider: .codex, cwd: "/tmp/project")
 
-        XCTAssertFalse(
+        XCTAssertTrue(
             ExpandedPanelView.shouldShowSharedUsageBar(
                 effectiveSession: codex,
                 activeSessions: [codex]
@@ -32,6 +32,109 @@ final class ExpandedPanelViewTests: XCTestCase {
                 effectiveSession: nil,
                 activeSessions: []
             )
+        )
+    }
+
+    func testSelectedCodexSessionShowsCodexUsageEvenWhenClaudeUsageIsNewer() {
+        let codexSession = SessionData(sessionId: "codex-session", provider: .codex, cwd: "/tmp/project")
+        let claude = makeUsageState(provider: .claude, usage: 42, observedAt: Date(timeIntervalSince1970: 200))
+        let codex = makeUsageState(provider: .codex, usage: 11, observedAt: Date(timeIntervalSince1970: 100))
+
+        let state = ExpandedPanelView.sharedUsageBarState(
+            effectiveSession: codexSession,
+            claude: claude,
+            codex: codex
+        )
+
+        XCTAssertEqual(state?.provider, .codex)
+        XCTAssertEqual(state?.usage?.usagePercentage, 11)
+    }
+
+    func testSelectedClaudeSessionShowsClaudeUsageEvenWhenCodexUsageIsNewer() {
+        let claudeSession = SessionData(sessionId: "claude-session", provider: .claude, cwd: "/tmp/project")
+        let claude = makeUsageState(provider: .claude, usage: 42, observedAt: Date(timeIntervalSince1970: 100))
+        let codex = makeUsageState(provider: .codex, usage: 11, observedAt: Date(timeIntervalSince1970: 200))
+
+        let state = ExpandedPanelView.sharedUsageBarState(
+            effectiveSession: claudeSession,
+            claude: claude,
+            codex: codex
+        )
+
+        XCTAssertEqual(state?.provider, .claude)
+        XCTAssertEqual(state?.usage?.usagePercentage, 42)
+    }
+
+    func testNoSelectedSessionUsesMostRecentlyObservedUsage() {
+        let claude = makeUsageState(provider: .claude, usage: 42, observedAt: Date(timeIntervalSince1970: 100))
+        let codex = makeUsageState(provider: .codex, usage: 11, observedAt: Date(timeIntervalSince1970: 200))
+
+        let state = ExpandedPanelView.sharedUsageBarState(
+            effectiveSession: nil,
+            claude: claude,
+            codex: codex
+        )
+
+        XCTAssertEqual(state?.provider, .codex)
+        XCTAssertEqual(state?.usage?.usagePercentage, 11)
+    }
+
+    func testMixedProviderSessionsAreDetectedForUsageLabel() {
+        let claude = SessionData(sessionId: "claude-session", provider: .claude, cwd: "/tmp/project")
+        let codex = SessionData(sessionId: "codex-session", provider: .codex, cwd: "/tmp/project")
+
+        XCTAssertTrue(ExpandedPanelView.hasMixedClaudeAndCodexSessions([claude, codex]))
+        XCTAssertFalse(ExpandedPanelView.hasMixedClaudeAndCodexSessions([claude]))
+        XCTAssertFalse(ExpandedPanelView.hasMixedClaudeAndCodexSessions([codex]))
+    }
+
+    func testMixedProviderSessionsUseSelectedProviderResetLabelPrefix() {
+        let claudeSession = SessionData(sessionId: "claude-session", provider: .claude, cwd: "/tmp/project")
+        let codexSession = SessionData(sessionId: "codex-session", provider: .codex, cwd: "/tmp/project")
+        let codex = makeUsageState(provider: .codex, usage: 11, observedAt: Date(timeIntervalSince1970: 100))
+
+        XCTAssertEqual(
+            ExpandedPanelView.sharedUsageResetLabelPrefix(
+                state: codex,
+                activeSessions: [codexSession, claudeSession]
+            ),
+            "Codex"
+        )
+    }
+
+    func testSingleProviderSessionsDoNotUseResetLabelPrefix() {
+        let codexSession = SessionData(sessionId: "codex-session", provider: .codex, cwd: "/tmp/project")
+        let codex = makeUsageState(provider: .codex, usage: 11, observedAt: Date(timeIntervalSince1970: 100))
+
+        XCTAssertNil(
+            ExpandedPanelView.sharedUsageResetLabelPrefix(
+                state: codex,
+                activeSessions: [codexSession]
+            )
+        )
+    }
+
+    func testCodexUsageBarIgnoresClaudeUsageSetting() {
+        XCTAssertTrue(ExpandedPanelView.sharedUsageBarIsEnabled(provider: .codex, appUsageEnabled: false))
+        XCTAssertFalse(ExpandedPanelView.sharedUsageBarIsEnabled(provider: .claude, appUsageEnabled: false))
+        XCTAssertTrue(ExpandedPanelView.sharedUsageBarIsEnabled(provider: .claude, appUsageEnabled: true))
+    }
+
+    private func makeUsageState(
+        provider: AgentProvider,
+        usage: Double,
+        observedAt: Date
+    ) -> SharedUsageBarState {
+        SharedUsageBarState(
+            provider: provider,
+            usage: QuotaPeriod(utilization: usage, resetDate: Date(timeIntervalSince1970: 1_000)),
+            isUsingExtraUsage: false,
+            isLoading: false,
+            error: nil,
+            statusMessage: nil,
+            isStale: false,
+            recoveryAction: .none,
+            lastObservedAt: observedAt
         )
     }
 }

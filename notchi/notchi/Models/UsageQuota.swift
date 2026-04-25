@@ -1,6 +1,6 @@
 import Foundation
 
-struct UsageResponse: Decodable {
+nonisolated struct UsageResponse: Decodable {
     let fiveHour: QuotaPeriod?
     let sevenDay: QuotaPeriod?
     let extraUsage: ExtraUsage?
@@ -12,7 +12,7 @@ struct UsageResponse: Decodable {
     }
 }
 
-struct ExtraUsage: Codable, Equatable {
+nonisolated struct ExtraUsage: Codable, Equatable {
     let isEnabled: Bool
     let monthlyLimit: Double?
     let usedCredits: Double?
@@ -26,7 +26,7 @@ struct ExtraUsage: Codable, Equatable {
     }
 }
 
-struct QuotaPeriod: Codable, Equatable {
+nonisolated struct QuotaPeriod: Codable, Equatable, Sendable {
     let utilization: Double
     let resetsAt: String?
 
@@ -74,7 +74,7 @@ struct QuotaPeriod: Codable, Equatable {
 }
 
 extension QuotaPeriod {
-    init(utilization: Double, resetDate: Date?) {
+    nonisolated init(utilization: Double, resetDate: Date?) {
         self.utilization = utilization
         self.resetsAt = resetDate.map { Self.isoFractional.string(from: $0) }
     }

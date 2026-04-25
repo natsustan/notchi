@@ -161,4 +161,33 @@ final class UsageBarViewTests: XCTestCase {
 
         XCTAssertFalse(view.shouldShowExtraUsageIndicator)
     }
+
+    func testResetLabelTextIncludesProviderPrefixWhenProvided() {
+        let view = UsageBarView(
+            usage: QuotaPeriod(utilization: 12, resetDate: Date(timeIntervalSince1970: 4_102_444_800)),
+            isLoading: false,
+            error: nil,
+            statusMessage: nil,
+            isStale: false,
+            recoveryAction: .none,
+            resetLabelPrefix: "Codex",
+            isEnabled: true
+        )
+
+        XCTAssertEqual(view.resetLabelText(for: "4m"), "Codex resets in 4m")
+    }
+
+    func testResetLabelTextOmitsProviderPrefixByDefault() {
+        let view = UsageBarView(
+            usage: QuotaPeriod(utilization: 12, resetDate: Date(timeIntervalSince1970: 4_102_444_800)),
+            isLoading: false,
+            error: nil,
+            statusMessage: nil,
+            isStale: false,
+            recoveryAction: .none,
+            isEnabled: true
+        )
+
+        XCTAssertEqual(view.resetLabelText(for: "4m"), "Resets in 4m")
+    }
 }

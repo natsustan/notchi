@@ -26,6 +26,9 @@ final class NotchiStateMachine {
         ClaudeUsageService.shared.handleClaudeResumeTrigger(trigger)
     }
     var isCodexProcessAlive: (Int) -> Bool
+    var clearCodexUsage: () -> Void = {
+        CodexUsageService.shared.clear()
+    }
 
     private static let syncDebounce: Duration = .milliseconds(100)
     private static let waitingClearGuard: TimeInterval = 2.0
@@ -430,6 +433,7 @@ final class NotchiStateMachine {
             codexThreadMetadataRefreshTask?.cancel()
             codexThreadMetadataRefreshTask = nil
             codexThreadMetadataImmediateRefreshKeys.removeAll()
+            clearCodexUsage()
         }
     }
 
@@ -454,11 +458,15 @@ final class NotchiStateMachine {
             return
         }
 
+        let transcriptPaths = requests.map(\.transcriptPath)
         codexThreadMetadataRefreshTask = Task { [weak self] in
             guard let self else { return }
             defer { self.codexThreadMetadataRefreshTask = nil }
 
-            let updates = await self.sessionStore.resolveCodexThreadMetadata(requests)
+            async let metadataUpdates = self.sessionStore.resolveCodexThreadMetadata(requests)
+            async let usageRefresh: Void = CodexUsageService.shared.refresh(transcriptPaths: transcriptPaths)
+            let updates = await metadataUpdates
+            _ = await usageRefresh
             guard !Task.isCancelled else { return }
 
             let archivedSessions = self.sessionStore.applyCodexThreadMetadata(updates)
@@ -480,6 +488,9 @@ final class NotchiStateMachine {
             ClaudeUsageService.shared.handleClaudeResumeTrigger(trigger)
         }
         isCodexProcessAlive = Self.defaultCodexProcessAlive
+        clearCodexUsage = {
+            CodexUsageService.shared.clear()
+        }
         codexProcessMonitorTask?.cancel()
         codexProcessMonitorTask = nil
         codexThreadMetadataMonitorTask?.cancel()

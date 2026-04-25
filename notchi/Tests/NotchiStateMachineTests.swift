@@ -9,6 +9,7 @@ final class NotchiStateMachineTests: XCTestCase {
         sessionKeys.forEach { SessionStore.shared.dismissSession($0) }
         NotchiStateMachine.shared.resetTestingHooks()
         SessionStore.shared.resetTestingHooks()
+        CodexUsageService.shared.clear()
         try await super.tearDown()
     }
 
@@ -339,6 +340,39 @@ final class NotchiStateMachineTests: XCTestCase {
         stateMachine.reconcileCodexThreadMetadataForTesting()
 
         XCTAssertNil(SessionStore.shared.session(for: sessionKey))
+    }
+
+    func testLastCodexSessionEndClearsCodexUsage() {
+        let stateMachine = NotchiStateMachine.shared
+        stateMachine.setCodexThreadMetadataAutoRefreshEnabledForTesting(false)
+        let sessionId = "codex-end-clear-usage-\(UUID().uuidString)"
+        let transcriptPath = "/tmp/codex-end-clear-usage.jsonl"
+
+        stateMachine.handleEvent(makeEvent(
+            sessionId: sessionId,
+            provider: .codex,
+            transcriptPath: transcriptPath,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "hello"
+        ))
+
+        CodexUsageService.shared.currentUsage = QuotaPeriod(
+            utilization: 15,
+            resetDate: Date(timeIntervalSinceNow: 300)
+        )
+        CodexUsageService.shared.lastObservedAt = Date()
+
+        stateMachine.handleEvent(makeEvent(
+            sessionId: sessionId,
+            provider: .codex,
+            transcriptPath: transcriptPath,
+            event: .sessionEnded,
+            status: "ended"
+        ))
+
+        XCTAssertNil(CodexUsageService.shared.currentUsage)
+        XCTAssertNil(CodexUsageService.shared.lastObservedAt)
     }
 
     private func makeInteractiveSession(sessionId: String) -> SessionData {

@@ -96,12 +96,45 @@ enum ActivityItem: Identifiable {
     }
 }
 
+nonisolated struct SharedUsageBarState {
+    let provider: AgentProvider
+    let usage: QuotaPeriod?
+    let isUsingExtraUsage: Bool
+    let isLoading: Bool
+    let error: String?
+    let statusMessage: String?
+    let isStale: Bool
+    let recoveryAction: ClaudeUsageRecoveryAction
+    let lastObservedAt: Date?
+
+    var label: String {
+        "\(provider.displayName) Usage"
+    }
+}
+
 struct ExpandedPanelView: View {
     let sessionStore: SessionStore
     let usageService: ClaudeUsageService
+    let codexUsageService: CodexUsageService
     @Binding var showingSettings: Bool
     @Binding var showingSessionActivity: Bool
     @Binding var isActivityCollapsed: Bool
+
+    init(
+        sessionStore: SessionStore,
+        usageService: ClaudeUsageService,
+        codexUsageService: CodexUsageService,
+        showingSettings: Binding<Bool>,
+        showingSessionActivity: Binding<Bool>,
+        isActivityCollapsed: Binding<Bool>
+    ) {
+        self.sessionStore = sessionStore
+        self.usageService = usageService
+        self.codexUsageService = codexUsageService
+        _showingSettings = showingSettings
+        _showingSessionActivity = showingSessionActivity
+        _isActivityCollapsed = isActivityCollapsed
+    }
 
     private var effectiveSession: SessionData? {
         sessionStore.effectiveSession
@@ -143,6 +176,56 @@ struct ExpandedPanelView: View {
         Self.shouldShowSharedUsageBar(
             effectiveSession: effectiveSession,
             activeSessions: sessionStore.sortedSessions
+        )
+    }
+
+    private var sharedUsageResetLabelPrefix: String? {
+        Self.sharedUsageResetLabelPrefix(
+            state: sharedUsageBarState,
+            activeSessions: sessionStore.sortedSessions
+        )
+    }
+
+    private var sharedUsageBarState: SharedUsageBarState? {
+        let activeSessions = sessionStore.sortedSessions
+        guard Self.shouldShowSharedUsageBar(
+            effectiveSession: effectiveSession,
+            activeSessions: activeSessions
+        ) else {
+            return nil
+        }
+
+        let hasClaude = activeSessions.contains { $0.provider == .claude }
+        let hasCodex = activeSessions.contains { $0.provider == .codex }
+
+        let claude = hasClaude ? SharedUsageBarState(
+            provider: .claude,
+            usage: usageService.currentUsage,
+            isUsingExtraUsage: usageService.isUsingExtraUsage,
+            isLoading: usageService.isLoading,
+            error: usageService.error,
+            statusMessage: usageService.statusMessage,
+            isStale: usageService.isUsageStale,
+            recoveryAction: usageService.recoveryAction,
+            lastObservedAt: usageService.lastObservedAt
+        ) : nil
+
+        let codex = hasCodex ? SharedUsageBarState(
+            provider: .codex,
+            usage: codexUsageService.currentUsage,
+            isUsingExtraUsage: false,
+            isLoading: false,
+            error: nil,
+            statusMessage: codexUsageService.statusMessage,
+            isStale: codexUsageService.isUsageStale,
+            recoveryAction: .none,
+            lastObservedAt: codexUsageService.lastObservedAt
+        ) : nil
+
+        return Self.sharedUsageBarState(
+            effectiveSession: effectiveSession,
+            claude: claude,
+            codex: codex
         )
     }
 
@@ -293,28 +376,83 @@ struct ExpandedPanelView: View {
 
     @ViewBuilder
     private var sharedUsageBar: some View {
-        if shouldShowSharedUsageBar {
+        if let state = sharedUsageBarState {
             UsageBarView(
-                usage: usageService.currentUsage,
-                isUsingExtraUsage: usageService.isUsingExtraUsage,
-                isLoading: usageService.isLoading,
-                error: usageService.error,
-                statusMessage: usageService.statusMessage,
-                isStale: usageService.isUsageStale,
-                recoveryAction: usageService.recoveryAction,
+                usage: state.usage,
+                isUsingExtraUsage: state.isUsingExtraUsage,
+                isLoading: state.isLoading,
+                error: state.error,
+                statusMessage: state.statusMessage,
+                isStale: state.isStale,
+                recoveryAction: state.recoveryAction,
+                label: state.label,
+                resetLabelPrefix: sharedUsageResetLabelPrefix,
                 compact: !shouldShowSessionPicker && isActivityCollapsed,
-                onConnect: { ClaudeUsageService.shared.connectAndStartPolling() },
-                onRetry: { ClaudeUsageService.shared.retryNow() }
+                isEnabled: Self.sharedUsageBarIsEnabled(provider: state.provider),
+                onConnect: state.provider == .claude ? { usageService.connectAndStartPolling() } : nil,
+                onRetry: state.provider == .claude ? { usageService.retryNow() } : nil
             )
         }
     }
 
     static func shouldShowSharedUsageBar(effectiveSession: SessionData?, activeSessions: [SessionData]) -> Bool {
-        guard let effectiveSession else { return true }
-        if effectiveSession.provider == .claude {
-            return true
+        !activeSessions.isEmpty || effectiveSession == nil
+    }
+
+    static func hasMixedClaudeAndCodexSessions(_ activeSessions: [SessionData]) -> Bool {
+        activeSessions.contains { $0.provider == .claude }
+            && activeSessions.contains { $0.provider == .codex }
+    }
+
+    static func sharedUsageResetLabelPrefix(
+        state: SharedUsageBarState?,
+        activeSessions: [SessionData]
+    ) -> String? {
+        guard let state, hasMixedClaudeAndCodexSessions(activeSessions) else {
+            return nil
         }
-        return activeSessions.contains { $0.provider == .claude }
+        return state.provider.displayName
+    }
+
+    static func sharedUsageBarIsEnabled(
+        provider: AgentProvider,
+        appUsageEnabled: Bool = AppSettings.isUsageEnabled
+    ) -> Bool {
+        provider == .codex || appUsageEnabled
+    }
+
+    static func sharedUsageBarState(
+        effectiveSession: SessionData?,
+        claude: SharedUsageBarState?,
+        codex: SharedUsageBarState?
+    ) -> SharedUsageBarState? {
+        guard let claude, let codex else {
+            return claude ?? codex
+        }
+
+        if let effectiveSession {
+            switch effectiveSession.provider {
+            case .claude:
+                return claude
+            case .codex:
+                return codex
+            }
+        }
+
+        if let claudeObservedAt = claude.lastObservedAt,
+           let codexObservedAt = codex.lastObservedAt,
+           claudeObservedAt != codexObservedAt {
+            return codexObservedAt > claudeObservedAt ? codex : claude
+        }
+
+        if claude.usage == nil, codex.usage != nil {
+            return codex
+        }
+        if codex.usage == nil, claude.usage != nil {
+            return claude
+        }
+
+        return claude
     }
 
     private var activitySection: some View {
