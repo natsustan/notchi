@@ -45,6 +45,50 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(session.recentEvents.isEmpty)
         XCTAssertTrue(session.recentAssistantMessages.isEmpty)
         XCTAssertEqual(session.lastUserPrompt, "second")
+        XCTAssertFalse(session.lastUserPromptHasAttachments)
+    }
+
+    func testUserPromptSubmitTracksAttachmentStateSeparatelyFromPromptText() {
+        let sessionId = "attached-prompt-\(UUID().uuidString)"
+        let store = SessionStore.shared
+
+        let session = store.process(makeEvent(
+            sessionId: sessionId,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "testing",
+            userPromptHasAttachments: true
+        ))
+
+        XCTAssertEqual(session.lastUserPrompt, "testing")
+        XCTAssertTrue(session.lastUserPromptHasAttachments)
+
+        _ = store.process(makeEvent(
+            sessionId: sessionId,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "plain",
+            userPromptHasAttachments: false
+        ))
+
+        XCTAssertEqual(session.lastUserPrompt, "plain")
+        XCTAssertFalse(session.lastUserPromptHasAttachments)
+    }
+
+    func testAttachmentOnlyUserPromptStillRecordsPromptSubmission() {
+        let store = SessionStore.shared
+
+        let session = store.process(makeEvent(
+            sessionId: "attachment-only-\(UUID().uuidString)",
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: nil,
+            userPromptHasAttachments: true
+        ))
+
+        XCTAssertNil(session.lastUserPrompt)
+        XCTAssertTrue(session.lastUserPromptHasAttachments)
+        XCTAssertNotNil(session.promptSubmitTime)
     }
 
     func testDisplaySessionNumbersRenumberAfterDismissal() {
@@ -181,6 +225,7 @@ final class SessionStoreTests: XCTestCase {
         event: NormalizedAgentEvent,
         status: String,
         userPrompt: String? = nil,
+        userPromptHasAttachments: Bool = false,
         tool: String? = nil,
         toolUseId: String? = nil
     ) -> HookEvent {
@@ -195,6 +240,7 @@ final class SessionStoreTests: XCTestCase {
             toolInput: nil,
             toolUseId: toolUseId,
             userPrompt: userPrompt,
+            userPromptHasAttachments: userPromptHasAttachments,
             permissionMode: nil,
             interactive: true
         )

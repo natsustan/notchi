@@ -11,6 +11,7 @@ import os
 import socket
 import subprocess
 import sys
+import time
 
 try:
     input_data = json.load(sys.stdin)
@@ -91,6 +92,64 @@ def codex_process_context():
 
     return fallback
 
+def has_non_empty_list(value):
+    return isinstance(value, list) and len(value) > 0
+
+def input_has_attachments(data):
+    for key in ('images', 'local_images', 'attachments', 'files'):
+        if has_non_empty_list(data.get(key)):
+            return True
+
+    return False
+
+def normalized_text(value):
+    return value.strip() if isinstance(value, str) else ''
+
+def transcript_user_message_attachment_state(path, normalized_prompt):
+    if not path:
+        return None
+
+    try:
+        with open(path, 'r', encoding='utf-8') as transcript:
+            lines = transcript.readlines()
+    except Exception:
+        return None
+
+    for line in reversed(lines[-200:]):
+        try:
+            event = json.loads(line)
+        except Exception:
+            continue
+
+        payload = event.get('payload')
+        if not isinstance(payload, dict) or payload.get('type') != 'user_message':
+            continue
+
+        if normalized_text(payload.get('message')) != normalized_prompt:
+            return None
+
+        return (
+            has_non_empty_list(payload.get('images')) or
+            has_non_empty_list(payload.get('local_images'))
+        )
+
+    return None
+
+def latest_transcript_user_message_has_attachments(path, prompt):
+    normalized_prompt = normalized_text(prompt)
+    if not normalized_prompt:
+        return False
+
+    for attempt in range(5):
+        state = transcript_user_message_attachment_state(path, normalized_prompt)
+        if state is not None:
+            return state
+
+        if attempt < 4:
+            time.sleep(0.05)
+
+    return False
+
 context = codex_process_context()
 if context:
     output['codex_process_id'] = context[0]
@@ -99,6 +158,12 @@ if context:
 prompt = input_data.get('prompt')
 if prompt:
     output['user_prompt'] = prompt
+
+if hook_event == 'UserPromptSubmit':
+    output['has_attachments'] = (
+        input_has_attachments(input_data) or
+        latest_transcript_user_message_has_attachments(input_data.get('transcript_path'), prompt)
+    )
 
 try:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

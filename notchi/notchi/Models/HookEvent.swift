@@ -49,6 +49,7 @@ struct AgentHookEnvelope: Decodable, Sendable {
     let interactive: Bool?
     let codexProcessId: Int?
     let codexOrigin: CodexOrigin?
+    let hasAttachments: Bool?
 
     enum CodingKeys: String, CodingKey {
         case provider
@@ -62,6 +63,7 @@ struct AgentHookEnvelope: Decodable, Sendable {
         case interactive
         case codexProcessId = "codex_process_id"
         case codexOrigin = "codex_origin"
+        case hasAttachments = "has_attachments"
     }
 
     nonisolated init(from decoder: Decoder) throws {
@@ -81,6 +83,7 @@ struct AgentHookEnvelope: Decodable, Sendable {
         interactive = try container.decodeIfPresent(Bool.self, forKey: .interactive)
         codexProcessId = try container.decodeIfPresent(Int.self, forKey: .codexProcessId)
         codexOrigin = try container.decodeIfPresent(CodexOrigin.self, forKey: .codexOrigin)
+        hasAttachments = try container.decodeIfPresent(Bool.self, forKey: .hasAttachments)
     }
 }
 
@@ -95,6 +98,7 @@ struct HookEvent: Sendable {
     let toolInput: [String: AnyCodable]?
     let toolUseId: String?
     let userPrompt: String?
+    let userPromptHasAttachments: Bool
     let permissionMode: String?
     let interactive: Bool?
     let codexProcessId: Int?
@@ -119,6 +123,7 @@ struct HookEvent: Sendable {
         toolInput: [String: AnyCodable]? = nil,
         toolUseId: String? = nil,
         userPrompt: String? = nil,
+        userPromptHasAttachments: Bool = false,
         permissionMode: String? = nil,
         interactive: Bool? = nil,
         codexProcessId: Int? = nil,
@@ -134,6 +139,7 @@ struct HookEvent: Sendable {
         self.toolInput = toolInput
         self.toolUseId = toolUseId
         self.userPrompt = userPrompt
+        self.userPromptHasAttachments = userPromptHasAttachments
         self.permissionMode = permissionMode
         self.interactive = interactive
         self.codexProcessId = codexProcessId

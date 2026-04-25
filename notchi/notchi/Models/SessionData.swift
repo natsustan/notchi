@@ -32,6 +32,7 @@ final class SessionData: Identifiable {
     private(set) var recentEvents: [SessionEvent] = []
     private(set) var recentAssistantMessages: [AssistantMessage] = []
     private(set) var lastUserPrompt: String?
+    private(set) var lastUserPromptHasAttachments: Bool = false
     private(set) var promptSubmitTime: Date?
     private(set) var permissionMode: String = "default"
     private(set) var pendingQuestions: [PendingQuestion] = []
@@ -185,9 +186,15 @@ final class SessionData: Identifiable {
         lastActivity = Date()
     }
 
-    func recordUserPrompt(_ prompt: String) {
+    func recordUserPrompt(_ prompt: String?, hasAttachments: Bool = false) {
         let now = Date()
-        lastUserPrompt = prompt.truncatedForPrompt()
+        if let trimmedPrompt = prompt?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !trimmedPrompt.isEmpty {
+            lastUserPrompt = trimmedPrompt.truncatedForPrompt()
+        } else {
+            lastUserPrompt = nil
+        }
+        lastUserPromptHasAttachments = hasAttachments
         promptSubmitTime = now
         lastActivity = now
         logger.debug("Setting promptSubmitTime to: \(now)")

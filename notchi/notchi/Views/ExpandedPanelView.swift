@@ -486,8 +486,12 @@ struct ExpandedPanelView: View {
                     ScrollViewReader { proxy in
                         ScrollView(showsIndicators: false) {
                             VStack(alignment: .leading, spacing: 0) {
-                                if let prompt = effectiveSession?.lastUserPrompt {
-                                    UserPromptBubbleView(text: prompt)
+                                if effectiveSession?.lastUserPrompt != nil ||
+                                    effectiveSession?.lastUserPromptHasAttachments == true {
+                                    UserPromptBubbleView(
+                                        text: effectiveSession?.lastUserPrompt,
+                                        hasAttachment: effectiveSession?.lastUserPromptHasAttachments == true
+                                    )
                                         .frame(maxWidth: .infinity, alignment: .trailing)
                                         .padding(.bottom, 8)
                                 }

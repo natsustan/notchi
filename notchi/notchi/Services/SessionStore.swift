@@ -94,8 +94,8 @@ final class SessionStore {
 
         switch event.event {
         case .userPromptSubmitted:
-            if let prompt = event.userPrompt {
-                session.recordUserPrompt(prompt)
+            if event.userPrompt != nil || event.userPromptHasAttachments {
+                session.recordUserPrompt(event.userPrompt, hasAttachments: event.userPromptHasAttachments)
             }
             session.clearRecentEvents()
             session.clearAssistantMessages()

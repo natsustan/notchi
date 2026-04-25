@@ -54,6 +54,90 @@ final class AgentProviderAdapterTests: XCTestCase {
         XCTAssertEqual(event?.codexOrigin, .cli)
     }
 
+    func testCodexAdapterStripsFilesMentionedPreambleFromPrompt() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "provider": "codex",
+            "session_id": "codex-session",
+            "cwd": "/tmp",
+            "event": "UserPromptSubmit",
+            "status": "processing",
+            "transcript_path": "/tmp/codex-rollout.jsonl",
+            "user_prompt": """
+            # Files mentioned by the user:
+
+            ## CleanShot.png: /Users/ruban/Library/Application Support/CleanShot/media/CleanShot.png
+
+            ## My request for Codex:
+            testing
+            """,
+        ])
+        let envelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: data)
+
+        let event = CodexProviderAdapter().normalize(envelope)
+
+        XCTAssertEqual(event?.userPrompt, "testing")
+        XCTAssertEqual(event?.userPromptHasAttachments, true)
+    }
+
+    func testCodexAdapterUsesAttachedFilePromptWhenFilesPreambleHasNoRequestText() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "provider": "codex",
+            "session_id": "codex-session",
+            "cwd": "/tmp",
+            "event": "UserPromptSubmit",
+            "status": "processing",
+            "transcript_path": "/tmp/codex-rollout.jsonl",
+            "user_prompt": """
+            # Files mentioned by the user:
+
+            ## CleanShot.png: /Users/ruban/Library/Application Support/CleanShot/media/CleanShot.png
+            """,
+        ])
+        let envelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: data)
+
+        let event = CodexProviderAdapter().normalize(envelope)
+
+        XCTAssertNil(event?.userPrompt)
+        XCTAssertEqual(event?.userPromptHasAttachments, true)
+    }
+
+    func testCodexAdapterPrependsAttachedFileWhenHookMarksAttachments() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "provider": "codex",
+            "session_id": "codex-session",
+            "cwd": "/tmp",
+            "event": "UserPromptSubmit",
+            "status": "processing",
+            "transcript_path": "/tmp/codex-rollout.jsonl",
+            "user_prompt": "testing\n",
+            "has_attachments": true,
+        ])
+        let envelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: data)
+
+        let event = CodexProviderAdapter().normalize(envelope)
+
+        XCTAssertEqual(event?.userPrompt, "testing")
+        XCTAssertEqual(event?.userPromptHasAttachments, true)
+    }
+
+    func testCodexAdapterUsesAttachedFileWhenHookMarksAttachmentsWithoutPrompt() throws {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "provider": "codex",
+            "session_id": "codex-session",
+            "cwd": "/tmp",
+            "event": "UserPromptSubmit",
+            "status": "processing",
+            "transcript_path": "/tmp/codex-rollout.jsonl",
+            "has_attachments": true,
+        ])
+        let envelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: data)
+
+        let event = CodexProviderAdapter().normalize(envelope)
+
+        XCTAssertNil(event?.userPrompt)
+        XCTAssertEqual(event?.userPromptHasAttachments, true)
+    }
+
     func testCodexAdapterDropsUnsupportedEnvelope() throws {
         let data = try JSONSerialization.data(withJSONObject: [
             "provider": "codex",
