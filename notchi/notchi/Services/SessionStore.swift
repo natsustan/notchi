@@ -471,16 +471,19 @@ nonisolated enum CodexThreadMetadataResolver {
 
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
             return nil
         }
+
+        // Drain stdout before waiting so sqlite3 cannot block on a full pipe
+        // while Notchi waits for the process to exit.
+        let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
 
         guard process.terminationStatus == 0 else {
             return nil
         }
 
-        let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
         let output = String(data: data, encoding: .utf8)?
             .trimmingCharacters(in: .whitespacesAndNewlines)
 
