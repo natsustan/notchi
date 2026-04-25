@@ -36,7 +36,7 @@ final class SessionData: Identifiable {
     private(set) var promptSubmitTime: Date?
     private(set) var permissionMode: String = "default"
     private(set) var pendingQuestions: [PendingQuestion] = []
-    private(set) var currentSpinnerVerb: String = SpinnerVerbs.randomWorkingVerb()
+    private(set) var currentSpinnerVerb: String
     private(set) var codexProcessId: Int?
     private(set) var codexOrigin: CodexOrigin?
     private(set) var codexTitle: String?
@@ -108,6 +108,7 @@ final class SessionData: Identifiable {
         self.isInteractive = isInteractive
         self.sessionStartTime = sessionStartTime
         self.lastActivity = sessionStartTime
+        self.currentSpinnerVerb = SpinnerVerbs.providerVerb(for: sessionKey.provider)
 
         let hash = UInt(bitPattern: sessionKey.stableId.hashValue)
         self.spriteXPosition = Self.resolveXPosition(hash: hash, existingPositions: existingXPositions)
