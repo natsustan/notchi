@@ -427,27 +427,37 @@ nonisolated enum CodexThreadMetadataResolver {
             return nil
         }
 
-        let escapedPath = trimmedPath.replacingOccurrences(of: "'", with: "''")
-        let threadIdClause = codexThreadId(from: trimmedPath).map { threadId in
-            let escapedThreadId = threadId.replacingOccurrences(of: "'", with: "''")
-            return " OR id = '\(escapedThreadId)'"
-        } ?? ""
-        let query = "SELECT hex(title), archived FROM threads WHERE rollout_path = '\(escapedPath)'\(threadIdClause) LIMIT 1;"
+        let query = "SELECT id, rollout_path, hex(title), archived FROM threads;"
         guard let output = runSQLite(query: query, databasePath: stateURL.path) else {
             return nil
         }
 
-        let parts = output.split(separator: "\u{1F}", omittingEmptySubsequences: false)
-        guard parts.count >= 2 else { return nil }
+        return metadata(fromSQLiteOutput: output, matchingTranscriptPath: trimmedPath)
+    }
 
-        let title = decodeHexString(String(parts[0]))?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let archived = String(parts[1]).trimmingCharacters(in: .whitespacesAndNewlines) != "0"
+    static func metadata(fromSQLiteOutput output: String, matchingTranscriptPath transcriptPath: String) -> CodexThreadMetadata? {
+        let threadId = codexThreadId(from: transcriptPath)
 
-        return CodexThreadMetadata(
-            title: title?.isEmpty == false ? title : nil,
-            archived: archived
-        )
+        for row in output.split(separator: "\n", omittingEmptySubsequences: false) {
+            let parts = row.split(separator: "\u{1F}", omittingEmptySubsequences: false)
+            guard parts.count >= 4 else { continue }
+
+            let rowId = String(parts[0])
+            let rolloutPath = String(parts[1])
+            let matchesThreadId = threadId.map { $0 == rowId } ?? false
+            guard rolloutPath == transcriptPath || matchesThreadId else { continue }
+
+            let title = decodeHexString(String(parts[2]))?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let archived = String(parts[3]).trimmingCharacters(in: .whitespacesAndNewlines) != "0"
+
+            return CodexThreadMetadata(
+                title: title?.isEmpty == false ? title : nil,
+                archived: archived
+            )
+        }
+
+        return nil
     }
 
     private static func runSQLite(query: String, databasePath: String) -> String? {

@@ -30,7 +30,20 @@ nonisolated private struct CodexToolCall: Sendable {
 actor ConversationParser {
     static let shared = ConversationParser()
     nonisolated static let defaultClaudeProjectsRootPath = "\(NSHomeDirectory())/.claude/projects"
-    nonisolated(unsafe) static var claudeProjectsRootPath = defaultClaudeProjectsRootPath
+    private static let claudeProjectsRootPathLock = NSLock()
+    nonisolated(unsafe) private static var lockedClaudeProjectsRootPath = defaultClaudeProjectsRootPath
+    nonisolated static var claudeProjectsRootPath: String {
+        get {
+            claudeProjectsRootPathLock.lock()
+            defer { claudeProjectsRootPathLock.unlock() }
+            return lockedClaudeProjectsRootPath
+        }
+        set {
+            claudeProjectsRootPathLock.lock()
+            defer { claudeProjectsRootPathLock.unlock() }
+            lockedClaudeProjectsRootPath = newValue
+        }
+    }
 
     private var lastFileOffset: [String: UInt64] = [:]
     private var seenMessageIds: [String: Set<String>] = [:]

@@ -35,6 +35,7 @@ final class NotchiStateMachine {
     private static let codexProcessMonitorInterval: Duration = .seconds(2)
     private static let codexThreadMetadataMonitorInterval: Duration = .seconds(5)
     private static let codexProcessMissLimit = 2
+    private static let pendingCodexSessionStartMaxAge: TimeInterval = 10 * 60
 
     var currentState: NotchiState {
         sessionStore.effectiveSession?.state ?? .idle
@@ -46,6 +47,8 @@ final class NotchiStateMachine {
     }
 
     func handleEvent(_ event: HookEvent) {
+        trimPendingCodexSessionStartTimes()
+
         let transcriptPath = ConversationParser.resolvedTranscriptPath(
             for: event.provider,
             sessionId: event.rawSessionId,
@@ -230,6 +233,13 @@ final class NotchiStateMachine {
         }
 
         return pendingCodexSessionStartTimes.removeValue(forKey: event.sessionKey)
+    }
+
+    private func trimPendingCodexSessionStartTimes(now: Date = Date()) {
+        let cutoff = now.addingTimeInterval(-Self.pendingCodexSessionStartMaxAge)
+        pendingCodexSessionStartTimes = pendingCodexSessionStartTimes.filter { _, startTime in
+            startTime >= cutoff
+        }
     }
 
     func applyParsedSessionEvents(_ events: [ParsedSessionEvent], for sessionKey: ProviderSessionKey) {
@@ -500,6 +510,7 @@ final class NotchiStateMachine {
         codexThreadMetadataImmediateRefreshKeys.removeAll()
         codexThreadMetadataAutoRefreshEnabled = true
         codexProcessMissCounts.removeAll()
+        pendingCodexSessionStartTimes.removeAll()
     }
 
 #if DEBUG
@@ -515,6 +526,14 @@ final class NotchiStateMachine {
 
     func setCodexThreadMetadataAutoRefreshEnabledForTesting(_ enabled: Bool) {
         codexThreadMetadataAutoRefreshEnabled = enabled
+    }
+
+    func setPendingCodexSessionStartTimeForTesting(_ startTime: Date, sessionKey: ProviderSessionKey) {
+        pendingCodexSessionStartTimes[sessionKey] = startTime
+    }
+
+    func pendingCodexSessionStartTimeForTesting(sessionKey: ProviderSessionKey) -> Date? {
+        pendingCodexSessionStartTimes[sessionKey]
     }
 #endif
 

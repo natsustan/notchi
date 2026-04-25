@@ -106,10 +106,56 @@ nonisolated struct SharedUsageBarState {
     let isStale: Bool
     let recoveryAction: ClaudeUsageRecoveryAction
     let lastObservedAt: Date?
+    let labelOverride: String?
+    let isProviderSpecific: Bool
+
+    init(
+        provider: AgentProvider,
+        usage: QuotaPeriod?,
+        isUsingExtraUsage: Bool,
+        isLoading: Bool,
+        error: String?,
+        statusMessage: String?,
+        isStale: Bool,
+        recoveryAction: ClaudeUsageRecoveryAction,
+        lastObservedAt: Date?,
+        labelOverride: String? = nil,
+        isProviderSpecific: Bool = true
+    ) {
+        self.provider = provider
+        self.usage = usage
+        self.isUsingExtraUsage = isUsingExtraUsage
+        self.isLoading = isLoading
+        self.error = error
+        self.statusMessage = statusMessage
+        self.isStale = isStale
+        self.recoveryAction = recoveryAction
+        self.lastObservedAt = lastObservedAt
+        self.labelOverride = labelOverride
+        self.isProviderSpecific = isProviderSpecific
+    }
 
     var label: String {
-        "\(provider.displayName) Usage"
+        if let labelOverride {
+            return labelOverride
+        }
+        return "\(provider.displayName) Usage"
     }
+
+    static let noActiveSession = SharedUsageBarState(
+        // Provider is a placeholder; isProviderSpecific=false suppresses provider-keyed UI.
+        provider: .claude,
+        usage: nil,
+        isUsingExtraUsage: false,
+        isLoading: false,
+        error: nil,
+        statusMessage: nil,
+        isStale: false,
+        recoveryAction: .none,
+        lastObservedAt: nil,
+        labelOverride: "Start a session to track usage",
+        isProviderSpecific: false
+    )
 }
 
 struct ExpandedPanelView: View {
@@ -200,10 +246,14 @@ struct ExpandedPanelView: View {
             return nil
         }
 
-        let hasClaude = activeSessions.contains { $0.provider == .claude }
-        let hasCodex = activeSessions.contains { $0.provider == .codex }
+        if activeSessions.isEmpty {
+            return .noActiveSession
+        }
 
-        let claude = hasClaude ? SharedUsageBarState(
+        let includesClaude = Self.includesClaudeUsage(activeSessions: activeSessions)
+        let includesCodex = Self.includesCodexUsage(activeSessions: activeSessions)
+
+        let claude = includesClaude ? SharedUsageBarState(
             provider: .claude,
             usage: usageService.currentUsage,
             isUsingExtraUsage: usageService.isUsingExtraUsage,
@@ -215,7 +265,7 @@ struct ExpandedPanelView: View {
             lastObservedAt: usageService.lastObservedAt
         ) : nil
 
-        let codex = hasCodex ? SharedUsageBarState(
+        let codex = includesCodex ? SharedUsageBarState(
             provider: .codex,
             usage: codexUsageService.currentUsage,
             isUsingExtraUsage: false,
@@ -394,15 +444,23 @@ struct ExpandedPanelView: View {
                 label: state.label,
                 resetLabelPrefix: sharedUsageResetLabelPrefix,
                 compact: !shouldShowSessionPicker && isActivityCollapsed,
-                isEnabled: Self.sharedUsageBarIsEnabled(provider: state.provider),
-                onConnect: state.provider == .claude ? { usageService.connectAndStartPolling() } : nil,
-                onRetry: state.provider == .claude ? { usageService.retryNow() } : nil
+                isEnabled: state.isProviderSpecific ? Self.sharedUsageBarIsEnabled(provider: state.provider) : true,
+                onConnect: state.provider == .claude && state.isProviderSpecific ? { usageService.connectAndStartPolling() } : nil,
+                onRetry: state.provider == .claude && state.isProviderSpecific ? { usageService.retryNow() } : nil
             )
         }
     }
 
     static func shouldShowSharedUsageBar(contextSession: SessionData?, activeSessions: [SessionData]) -> Bool {
         !activeSessions.isEmpty || contextSession == nil
+    }
+
+    static func includesClaudeUsage(activeSessions: [SessionData]) -> Bool {
+        activeSessions.contains { $0.provider == .claude }
+    }
+
+    static func includesCodexUsage(activeSessions: [SessionData]) -> Bool {
+        activeSessions.contains { $0.provider == .codex }
     }
 
     static func hasMixedClaudeAndCodexSessions(_ activeSessions: [SessionData]) -> Bool {

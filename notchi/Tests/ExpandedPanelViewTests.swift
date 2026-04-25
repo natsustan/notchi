@@ -35,6 +35,27 @@ final class ExpandedPanelViewTests: XCTestCase {
         )
     }
 
+    func testNoActiveSessionsUseNeutralUsageState() {
+        let state = SharedUsageBarState.noActiveSession
+
+        XCTAssertEqual(state.label, "Start a session to track usage")
+        XCTAssertFalse(state.isProviderSpecific)
+        XCTAssertNil(state.usage)
+        XCTAssertFalse(ExpandedPanelView.includesClaudeUsage(activeSessions: []))
+        XCTAssertFalse(ExpandedPanelView.includesCodexUsage(activeSessions: []))
+    }
+
+    func testActiveSessionsIncludeOnlyPresentUsageProviders() {
+        let claude = SessionData(sessionId: "claude-session", provider: .claude, cwd: "/tmp/project")
+        let codex = SessionData(sessionId: "codex-session", provider: .codex, cwd: "/tmp/project")
+
+        XCTAssertTrue(ExpandedPanelView.includesClaudeUsage(activeSessions: [claude]))
+        XCTAssertFalse(ExpandedPanelView.includesCodexUsage(activeSessions: [claude]))
+
+        XCTAssertFalse(ExpandedPanelView.includesClaudeUsage(activeSessions: [codex]))
+        XCTAssertTrue(ExpandedPanelView.includesCodexUsage(activeSessions: [codex]))
+    }
+
     func testSelectedCodexSessionShowsCodexUsageEvenWhenClaudeUsageIsNewer() {
         let codexSession = SessionData(sessionId: "codex-session", provider: .codex, cwd: "/tmp/project")
         let claude = makeUsageState(provider: .claude, usage: 42, observedAt: Date(timeIntervalSince1970: 200))

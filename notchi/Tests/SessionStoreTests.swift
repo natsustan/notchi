@@ -217,6 +217,41 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertTrue(session.codexArchived)
     }
 
+    func testCodexThreadMetadataResolverMatchesLiteralRolloutPathFromSQLiteOutput() {
+        let separator = "\u{1F}"
+        let transcriptPath = "/tmp/notchi'; DROP TABLE threads; --/rollout.jsonl"
+        let output = [
+            ["other", "/tmp/other.jsonl", "4F74686572", "0"].joined(separator: separator),
+            ["thread-1", transcriptPath, "526576696577", "0"].joined(separator: separator),
+        ].joined(separator: "\n")
+
+        let metadata = CodexThreadMetadataResolver.metadata(
+            fromSQLiteOutput: output,
+            matchingTranscriptPath: transcriptPath
+        )
+
+        XCTAssertEqual(metadata, CodexThreadMetadata(title: "Review", archived: false))
+    }
+
+    func testCodexThreadMetadataResolverFallsBackToThreadIdFromTranscriptFilename() {
+        let separator = "\u{1F}"
+        let threadId = "123e4567-e89b-12d3-a456-426614174000"
+        let transcriptPath = "/tmp/rollout-\(threadId).jsonl"
+        let output = [
+            threadId,
+            "/tmp/renamed-rollout.jsonl",
+            "4172636869766564",
+            "1",
+        ].joined(separator: separator)
+
+        let metadata = CodexThreadMetadataResolver.metadata(
+            fromSQLiteOutput: output,
+            matchingTranscriptPath: transcriptPath
+        )
+
+        XCTAssertEqual(metadata, CodexThreadMetadata(title: "Archived", archived: true))
+    }
+
     private func makeEvent(
         sessionId: String,
         provider: AgentProvider = .claude,

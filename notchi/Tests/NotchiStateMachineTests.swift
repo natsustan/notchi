@@ -198,6 +198,24 @@ final class NotchiStateMachineTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(promptSubmitTime.timeIntervalSince(session.sessionStartTime), 0.15)
     }
 
+    func testStaleCodexSessionStartTimesAreTrimmedOnNextEvent() {
+        let stateMachine = NotchiStateMachine.shared
+        let staleKey = ProviderSessionKey(provider: .codex, rawSessionId: "stale-\(UUID().uuidString)")
+
+        stateMachine.setPendingCodexSessionStartTimeForTesting(
+            Date(timeIntervalSinceNow: -11 * 60),
+            sessionKey: staleKey
+        )
+
+        stateMachine.handleEvent(makeEvent(
+            sessionId: "claude-event-\(UUID().uuidString)",
+            event: .sessionStarted,
+            status: "processing"
+        ))
+
+        XCTAssertNil(stateMachine.pendingCodexSessionStartTimeForTesting(sessionKey: staleKey))
+    }
+
     func testApplyingParsedCodexSessionEventsRecordsBashActivity() {
         let stateMachine = NotchiStateMachine.shared
         let session = SessionStore.shared.process(makeEvent(
