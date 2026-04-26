@@ -50,7 +50,7 @@ struct ActivityRowView: View {
         let isSuccess = event.status == .success
         return Text(isSuccess ? "Completed" : "Failed")
             .font(.system(size: 12))
-            .foregroundColor(isSuccess ? TerminalColors.secondaryText : TerminalColors.red)
+            .foregroundColor(isSuccess ? TerminalColors.green : TerminalColors.red)
     }
 }
 
@@ -202,9 +202,12 @@ struct WorkingIndicatorView: View {
                 .font(.system(size: 14, weight: .bold))
                 .foregroundColor(color)
                 .frame(width: 14, alignment: .center)
-            Text(displayText)
-                .font(.system(size: 12, weight: .medium).italic())
-                .foregroundColor(color)
+            ShimmeringText(
+                text: displayText,
+                font: .system(size: 12, weight: .medium).italic(),
+                color: color,
+                isEnabled: state.task != .waiting
+            )
         }
         .padding(.leading, -1)
         .onReceive(dotsTimer) { _ in
@@ -214,6 +217,96 @@ struct WorkingIndicatorView: View {
             guard state.task != .waiting else { return }
             symbolPhase = (symbolPhase + 1) % WorkingIndicatorPresentation.animatedSymbols.count
         }
+    }
+}
+
+private struct ShimmeringText: View {
+    let text: String
+    let font: Font
+    let color: Color
+    let isEnabled: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isSweeping = false
+
+    private let duration: TimeInterval = 2.5
+    private let pauseBetweenSweepsNanoseconds: UInt64 = 1_000_000_000
+    private let frameDelayNanoseconds: UInt64 = 16_000_000
+
+    private var shimmerActive: Bool { isEnabled && !reduceMotion }
+
+    private struct ShimmerStateKey: Hashable {
+        let isEnabled: Bool
+        let reduceMotion: Bool
+    }
+
+    var body: some View {
+        Text(text)
+            .font(font)
+            .foregroundColor(color)
+            .overlay(alignment: .leading) {
+                if shimmerActive {
+                    shimmerSweep
+                        .mask(
+                            Text(text)
+                                .font(font)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        )
+                }
+            }
+            .task(id: ShimmerStateKey(isEnabled: isEnabled, reduceMotion: reduceMotion)) {
+                isSweeping = false
+                guard shimmerActive else { return }
+                await runShimmerLoop()
+            }
+    }
+
+    private func runShimmerLoop() async {
+        let sweepDurationNanoseconds = UInt64(duration * 1_000_000_000)
+
+        while !Task.isCancelled {
+            isSweeping = false
+
+            // WHY: Yield one frame so the reset to false commits before the
+            // animated true flip; otherwise SwiftUI coalesces them and the
+            // sweep starts mid-screen.
+            do {
+                try await Task.sleep(nanoseconds: frameDelayNanoseconds)
+            } catch {
+                return
+            }
+
+            withAnimation(.linear(duration: duration)) {
+                isSweeping = true
+            }
+
+            do {
+                try await Task.sleep(nanoseconds: sweepDurationNanoseconds + pauseBetweenSweepsNanoseconds)
+            } catch {
+                return
+            }
+        }
+    }
+
+    private var shimmerSweep: some View {
+        GeometryReader { proxy in
+            let width = max(proxy.size.width, 1)
+            let sweepWidth = max(width * 0.7, 64)
+            LinearGradient(
+                stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: Color.white.opacity(0.03), location: 0.3),
+                    .init(color: Color.white.opacity(0.42), location: 0.5),
+                    .init(color: Color.white.opacity(0.03), location: 0.7),
+                    .init(color: .clear, location: 1),
+                ],
+                startPoint: .leading,
+                endPoint: .trailing
+            )
+            .frame(width: sweepWidth, height: proxy.size.height)
+            .offset(x: isSweeping ? width + sweepWidth : -sweepWidth)
+        }
+        .allowsHitTesting(false)
     }
 }
 
