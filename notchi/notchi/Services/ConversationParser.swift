@@ -25,6 +25,7 @@ nonisolated struct ParsedSessionEvent: Sendable {
 nonisolated private struct CodexToolCall: Sendable {
     let tool: String
     let input: [String: AnyCodable]?
+    let requiresApproval: Bool
 }
 
 actor ConversationParser {
@@ -157,8 +158,8 @@ actor ConversationParser {
                     messages.append(message)
                 }
 
-                if let event = Self.parseCodexSessionEvent(from: json, toolCallsById: &codexToolCalls),
-                   !seenEvents.contains(event.id) {
+                let parsedEvents = Self.parseCodexSessionEvents(from: json, toolCallsById: &codexToolCalls)
+                for event in parsedEvents where !seenEvents.contains(event.id) {
                     seenEvents.insert(event.id)
                     events.append(event)
                 }
@@ -278,52 +279,65 @@ actor ConversationParser {
         return AssistantMessage(id: identifier, text: fullText, timestamp: timestamp)
     }
 
-    private static func parseCodexSessionEvent(
+    private static func parseCodexSessionEvents(
         from json: [String: Any],
         toolCallsById: inout [String: CodexToolCall]
-    ) -> ParsedSessionEvent? {
+    ) -> [ParsedSessionEvent] {
         guard let type = json["type"] as? String,
               type == "response_item",
               let payload = json["payload"] as? [String: Any],
               let payloadType = payload["type"] as? String else {
-            return nil
+            return []
         }
 
         switch payloadType {
         case "function_call":
             guard let callID = payload["call_id"] as? String,
                   let toolCall = parseCodexToolCall(from: payload) else {
-                return nil
+                return []
             }
 
             toolCallsById[callID] = toolCall
-            return ParsedSessionEvent(
-                id: "tool-start-\(callID)",
-                event: .preToolUse,
-                status: "running_tool",
-                tool: toolCall.tool,
-                toolInput: toolCall.input,
-                toolUseId: callID
-            )
+            var events = [
+                ParsedSessionEvent(
+                    id: "tool-start-\(callID)",
+                    event: .preToolUse,
+                    status: "running_tool",
+                    tool: toolCall.tool,
+                    toolInput: toolCall.input,
+                    toolUseId: callID
+                ),
+            ]
+            if toolCall.requiresApproval {
+                events.append(ParsedSessionEvent(
+                    id: "permission-request-\(callID)",
+                    event: .permissionRequest,
+                    status: "waiting_for_input",
+                    tool: toolCall.tool,
+                    toolInput: toolCall.input,
+                    toolUseId: callID
+                ))
+            }
+            return events
 
         case "function_call_output":
             guard let callID = payload["call_id"] as? String,
                   let toolCall = toolCallsById.removeValue(forKey: callID) else {
-                return nil
+                return []
             }
 
             let output = payload["output"] as? String ?? ""
-            return ParsedSessionEvent(
+            return [ParsedSessionEvent(
                 id: "tool-end-\(callID)",
                 event: .postToolUse,
                 status: isSuccessfulCodexToolOutput(output) ? "processing" : "error",
                 tool: toolCall.tool,
                 toolInput: nil,
                 toolUseId: callID
-            )
+            )]
 
         default:
-            return nil
+            return []
         }
     }
 
@@ -332,28 +346,43 @@ actor ConversationParser {
 
         switch name {
         case "exec_command":
-            let command = parseCodexExecCommand(from: payload["arguments"] as? String)
-            let input = command.map { ["command": AnyCodable($0)] }
-            return CodexToolCall(tool: "Bash", input: input)
+            let arguments = parseCodexExecArguments(from: payload["arguments"] as? String)
+            var input: [String: AnyCodable] = [:]
+            if let command = arguments?["cmd"] as? String {
+                input["command"] = AnyCodable(command)
+            }
+            if let justification = arguments?["justification"] as? String {
+                input["justification"] = AnyCodable(justification)
+            }
+            return CodexToolCall(
+                tool: "Bash",
+                input: input.isEmpty ? nil : input,
+                requiresApproval: arguments?["sandbox_permissions"] as? String == "require_escalated"
+            )
 
         default:
             return nil
         }
     }
 
-    private static func parseCodexExecCommand(from arguments: String?) -> String? {
+    private static func parseCodexExecArguments(from arguments: String?) -> [String: Any]? {
         guard let arguments,
               let data = arguments.data(using: .utf8),
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return nil
         }
 
-        return json["cmd"] as? String
+        return json
     }
 
     private static func isSuccessfulCodexToolOutput(_ output: String) -> Bool {
         if let match = output.firstMatch(of: /Process exited with code (\d+)/) {
             return match.1 == "0"
+        }
+
+        if output.localizedCaseInsensitiveContains("rejected by user") ||
+            output.localizedCaseInsensitiveContains("permission denied") {
+            return false
         }
 
         return !output.contains("Process exited with signal")

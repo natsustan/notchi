@@ -14,6 +14,10 @@ final class AgentProviderAdapterTests: XCTestCase {
         nonisolated func normalize(_ envelope: AgentHookEnvelope) -> HookEvent? { nil }
     }
 
+    func testCodexProviderCapabilitiesIncludePermissionPrompts() {
+        XCTAssertTrue(AgentProvider.codex.capabilities.supportsPermissionPrompts)
+    }
+
     func testClaudeAdapterNormalizesEnvelopeIntoHookEvent() throws {
         let data = try JSONSerialization.data(withJSONObject: [
             "session_id": "claude-session",

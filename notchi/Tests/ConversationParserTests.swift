@@ -160,6 +160,35 @@ final class ConversationParserTests: XCTestCase {
         XCTAssertEqual(result.events.last?.toolUseId, "call-123")
     }
 
+    func testParseIncrementalEmitsPermissionRequestForApprovalGatedCodexCommand() async throws {
+        let sessionKey = ProviderSessionKey(provider: .codex, rawSessionId: "codex-\(UUID().uuidString)")
+        let transcriptPath = tempDirectoryURL
+            .appendingPathComponent("\(UUID().uuidString)-codex-approval.jsonl")
+            .path
+        let parser = ConversationParser.shared
+
+        let contents = """
+        {"timestamp":"2026-04-11T04:00:00.000Z","type":"response_item","payload":{"type":"function_call","name":"exec_command","arguments":"{\\"cmd\\":\\"rm /tmp/notchi-permission-test.txt\\",\\"sandbox_permissions\\":\\"require_escalated\\",\\"justification\\":\\"Do you want to allow deleting the temporary Notchi permission test file?\\"}","call_id":"call-approval"}}
+        {"timestamp":"2026-04-11T04:00:01.000Z","type":"response_item","payload":{"type":"function_call_output","call_id":"call-approval","output":"rejected by user: permission denied"}}
+        """
+        FileManager.default.createFile(atPath: transcriptPath, contents: Data((contents + "\n").utf8))
+
+        let result = await parser.parseIncremental(sessionKey: sessionKey, transcriptPath: transcriptPath)
+        await parser.resetState(for: sessionKey)
+
+        XCTAssertEqual(result.events.count, 3)
+        XCTAssertEqual(result.events[0].event, .preToolUse)
+        XCTAssertEqual(result.events[0].toolInput?["command"]?.value as? String, "rm /tmp/notchi-permission-test.txt")
+        XCTAssertEqual(result.events[1].event, .permissionRequest)
+        XCTAssertEqual(result.events[1].status, "waiting_for_input")
+        XCTAssertEqual(result.events[1].tool, "Bash")
+        XCTAssertEqual(result.events[1].toolUseId, "call-approval")
+        XCTAssertEqual(result.events[1].toolInput?["justification"]?.value as? String, "Do you want to allow deleting the temporary Notchi permission test file?")
+        XCTAssertEqual(result.events[2].event, .postToolUse)
+        XCTAssertEqual(result.events[2].status, "error")
+        XCTAssertEqual(result.events[2].toolUseId, "call-approval")
+    }
+
     func testResolvedTranscriptPathReturnsNilForCodexWithoutTranscriptPath() {
         let path = ConversationParser.resolvedTranscriptPath(
             for: .codex,

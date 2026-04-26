@@ -281,8 +281,8 @@ final class NotchiStateMachine {
             session.updateTask(.idle)
             session.updateProcessingState(isProcessing: false)
         } else if session.task == .waiting,
+                  session.pendingQuestions.isEmpty,
                   Date().timeIntervalSince(session.lastActivity) > Self.waitingClearGuard {
-            session.clearPendingQuestions()
             session.updateTask(.working)
         }
     }

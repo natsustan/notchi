@@ -581,7 +581,9 @@ struct ExpandedPanelView: View {
                         }
                         .frame(maxHeight: 200)
                         .onAppear {
-                            if let lastItem = unifiedActivityItems.last {
+                            if effectiveSession?.pendingQuestions.isEmpty == false {
+                                scrollToQuestionPrompt(proxy: proxy)
+                            } else if let lastItem = unifiedActivityItems.last {
                                 proxy.scrollTo(lastItem.id, anchor: .bottom)
                             }
                         }
@@ -592,11 +594,9 @@ struct ExpandedPanelView: View {
                                 }
                             }
                         }
-                        .onChange(of: effectiveSession?.pendingQuestions.isEmpty) { _, isEmpty in
-                            if isEmpty == false {
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    proxy.scrollTo("question-prompt", anchor: .bottom)
-                                }
+                        .onChange(of: effectiveSession?.pendingQuestions.count) { _, count in
+                            if let count, count > 0 {
+                                scrollToQuestionPrompt(proxy: proxy)
                             }
                         }
                     }
@@ -638,6 +638,15 @@ struct ExpandedPanelView: View {
             let anchor: UnitPoint = expanded ? .top : .bottom
             withAnimation(.easeInOut(duration: 0.22)) {
                 proxy.scrollTo(id, anchor: anchor)
+            }
+        }
+    }
+
+    private func scrollToQuestionPrompt(proxy: ScrollViewProxy) {
+        Task { @MainActor in
+            await Task.yield()
+            withAnimation(.easeOut(duration: 0.2)) {
+                proxy.scrollTo("question-prompt", anchor: .bottom)
             }
         }
     }

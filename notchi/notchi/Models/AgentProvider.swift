@@ -31,7 +31,7 @@ nonisolated enum AgentProvider: String, Codable, CaseIterable, Hashable, Sendabl
             )
         case .codex:
             ProviderCapabilities(
-                supportsPermissionPrompts: false,
+                supportsPermissionPrompts: true,
                 supportsUsageResumeTriggers: false,
                 supportsPromptEmotionAnalysis: false,
                 supportsDerivedTranscriptFallback: false

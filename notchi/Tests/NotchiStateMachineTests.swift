@@ -49,6 +49,29 @@ final class NotchiStateMachineTests: XCTestCase {
         XCTAssertFalse(session.isProcessing)
     }
 
+    func testPendingPermissionRequestSurvivesFileSyncReconcile() async throws {
+        let stateMachine = NotchiStateMachine.shared
+        let sessionId = "permission-wait-\(UUID().uuidString)"
+        let session = makeInteractiveSession(sessionId: sessionId)
+
+        _ = SessionStore.shared.process(makeEvent(
+            sessionId: sessionId,
+            event: .permissionRequest,
+            status: "waiting_for_input"
+        ))
+
+        XCTAssertEqual(session.task, .waiting)
+        XCTAssertFalse(session.pendingQuestions.isEmpty)
+
+        try await Task.sleep(nanoseconds: 2_200_000_000)
+
+        let result = ParseResult(messages: [], interrupted: false)
+        stateMachine.reconcileFileSyncResult(result, for: session.sessionKey, hasActiveWatcher: true)
+
+        XCTAssertEqual(session.task, .waiting)
+        XCTAssertFalse(session.pendingQuestions.isEmpty)
+    }
+
     func testSessionStartForwardsToClaudeUsageHandler() {
         let stateMachine = NotchiStateMachine.shared
         var receivedTriggers: [ClaudeUsageResumeTrigger] = []
