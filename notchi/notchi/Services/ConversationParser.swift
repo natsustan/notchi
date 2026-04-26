@@ -152,6 +152,10 @@ actor ConversationParser {
                     continue
                 }
 
+                if !interrupted && Self.isCodexTurnAborted(json) {
+                    interrupted = true
+                }
+
                 if let message = Self.parseCodexAssistantMessage(from: json, originalLine: line),
                    !seen.contains(message.id) {
                     seen.insert(message.id)
@@ -277,6 +281,15 @@ actor ConversationParser {
 
         let identifier = "\(phase)-\(timestampString ?? "unknown")-\(stableContentDigest(for: originalLine))"
         return AssistantMessage(id: identifier, text: fullText, timestamp: timestamp)
+    }
+
+    private static func isCodexTurnAborted(_ json: [String: Any]) -> Bool {
+        guard json["type"] as? String == "event_msg",
+              let payload = json["payload"] as? [String: Any] else {
+            return false
+        }
+
+        return payload["type"] as? String == "turn_aborted"
     }
 
     private static func parseCodexSessionEvents(

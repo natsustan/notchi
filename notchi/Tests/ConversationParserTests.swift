@@ -189,6 +189,26 @@ final class ConversationParserTests: XCTestCase {
         XCTAssertEqual(result.events[2].toolUseId, "call-approval")
     }
 
+    func testParseIncrementalMarksCodexTurnAbortedAsInterrupted() async throws {
+        let sessionKey = ProviderSessionKey(provider: .codex, rawSessionId: "codex-\(UUID().uuidString)")
+        let transcriptPath = tempDirectoryURL
+            .appendingPathComponent("\(UUID().uuidString)-codex-aborted.jsonl")
+            .path
+        let parser = ConversationParser.shared
+
+        let contents = """
+        {"timestamp":"2026-04-11T04:00:00.000Z","type":"event_msg","payload":{"type":"turn_aborted"}}
+        """
+        FileManager.default.createFile(atPath: transcriptPath, contents: Data((contents + "\n").utf8))
+
+        let result = await parser.parseIncremental(sessionKey: sessionKey, transcriptPath: transcriptPath)
+        await parser.resetState(for: sessionKey)
+
+        XCTAssertTrue(result.interrupted)
+        XCTAssertTrue(result.messages.isEmpty)
+        XCTAssertTrue(result.events.isEmpty)
+    }
+
     func testResolvedTranscriptPathReturnsNilForCodexWithoutTranscriptPath() {
         let path = ConversationParser.resolvedTranscriptPath(
             for: .codex,
