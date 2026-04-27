@@ -42,6 +42,7 @@ final class SessionData: Identifiable {
     private(set) var codexTitle: String?
     private(set) var codexTranscriptPath: String?
     private(set) var codexArchived: Bool = false
+    private(set) var codexCompactionSignal: CodexCompactionSignal?
 
     private var durationTimer: Task<Void, Never>?
     private var sleepTimer: Task<Void, Never>?
@@ -240,6 +241,27 @@ final class SessionData: Identifiable {
         guard let metadata else { return }
         updateCodexTitle(metadata.title)
         codexArchived = metadata.archived
+    }
+
+    func updateCodexCompactionSignal(_ signal: CodexCompactionSignal?) {
+        guard provider == .codex else { return }
+
+        codexCompactionSignal = signal
+
+        guard let signal,
+              isProcessing else {
+            return
+        }
+
+        if let promptSubmitTime, signal.observedAt < promptSubmitTime {
+            return
+        }
+
+        if signal.tokenLimitReached {
+            updateTask(.compacting)
+        } else if task == .compacting {
+            updateTask(.working)
+        }
     }
 
     func setPendingQuestions(_ questions: [PendingQuestion]) {

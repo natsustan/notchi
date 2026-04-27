@@ -252,6 +252,132 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(metadata, CodexThreadMetadata(title: "Archived", archived: true))
     }
 
+    func testCodexCompactionSignalResolverParsesLatestTokenLimitLogRow() {
+        let separator = "\u{1F}"
+        let timestamp: TimeInterval = 1_775_000_000
+        let nanoseconds = 250_000_000
+        let body = """
+        session_loop{thread_id=thread}:turn:run_turn: post sampling token usage turn_id=turn total_usage_tokens=256300 estimated_token_count=Some(177642) auto_compact_limit=244800 token_limit_reached=true model_needs_follow_up=true has_pending_input=false needs_follow_up=true
+        """
+        let output = "\(Int(timestamp))\(separator)\(nanoseconds)\(separator)\(body)"
+
+        let signal = CodexCompactionSignalResolver.latestSignal(fromSQLiteOutput: output)
+
+        XCTAssertEqual(signal?.observedAt, Date(timeIntervalSince1970: timestamp + 0.25))
+        XCTAssertEqual(signal?.totalUsageTokens, 256300)
+        XCTAssertEqual(signal?.estimatedTokenCount, 177642)
+        XCTAssertEqual(signal?.autoCompactLimit, 244800)
+        XCTAssertEqual(signal?.tokenLimitReached, true)
+    }
+
+    func testRefreshCodexCompactionSignalsMarksCurrentProcessingCodexSessionCompacting() {
+        let store = SessionStore.shared
+        let sessionId = "codex-compact-\(UUID().uuidString)"
+        let transcriptPath = "/tmp/compact-rollout.jsonl"
+        let observedAt = Date(timeIntervalSinceNow: 1)
+        store.setCodexCompactionSignalResolverForTesting { threadId in
+            threadId == sessionId
+                ? CodexCompactionSignal(
+                    observedAt: observedAt,
+                    totalUsageTokens: 256_300,
+                    estimatedTokenCount: 177_642,
+                    autoCompactLimit: 244_800,
+                    tokenLimitReached: true
+                )
+                : nil
+        }
+
+        let session = store.process(makeEvent(
+            sessionId: sessionId,
+            provider: .codex,
+            cwd: "/tmp/notchi",
+            transcriptPath: transcriptPath,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "hello"
+        ))
+
+        store.refreshCodexCompactionSignalsForTesting()
+
+        XCTAssertEqual(session.codexCompactionSignal?.totalUsageTokens, 256_300)
+        XCTAssertEqual(session.task, .compacting)
+    }
+
+    func testStaleCodexCompactionSignalDoesNotOverrideNewPrompt() {
+        let store = SessionStore.shared
+        let sessionId = "codex-stale-compact-\(UUID().uuidString)"
+        let transcriptPath = "/tmp/stale-compact-rollout.jsonl"
+        store.setCodexCompactionSignalResolverForTesting { threadId in
+            threadId == sessionId
+                ? CodexCompactionSignal(
+                    observedAt: Date(timeIntervalSince1970: 1),
+                    totalUsageTokens: 256_300,
+                    estimatedTokenCount: nil,
+                    autoCompactLimit: 244_800,
+                    tokenLimitReached: true
+                )
+                : nil
+        }
+
+        let session = store.process(makeEvent(
+            sessionId: sessionId,
+            provider: .codex,
+            cwd: "/tmp/notchi",
+            transcriptPath: transcriptPath,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "new prompt"
+        ))
+
+        store.refreshCodexCompactionSignalsForTesting()
+
+        XCTAssertEqual(session.task, .working)
+    }
+
+    func testNewerNonLimitCodexCompactionSignalReturnsCompactingSessionToWorking() {
+        let store = SessionStore.shared
+        let sessionId = "codex-compact-clears-\(UUID().uuidString)"
+        let transcriptPath = "/tmp/compact-clears-rollout.jsonl"
+        let compactingSignal = CodexCompactionSignal(
+            observedAt: Date(timeIntervalSinceNow: 1),
+            totalUsageTokens: 256_300,
+            estimatedTokenCount: 177_642,
+            autoCompactLimit: 244_800,
+            tokenLimitReached: true
+        )
+        store.setCodexCompactionSignalResolverForTesting { threadId in
+            threadId == sessionId ? compactingSignal : nil
+        }
+
+        let session = store.process(makeEvent(
+            sessionId: sessionId,
+            provider: .codex,
+            cwd: "/tmp/notchi",
+            transcriptPath: transcriptPath,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "hello"
+        ))
+
+        store.refreshCodexCompactionSignalsForTesting()
+        XCTAssertEqual(session.task, .compacting)
+
+        let workingSignal = CodexCompactionSignal(
+            observedAt: Date(timeIntervalSinceNow: 2),
+            totalUsageTokens: 20_000,
+            estimatedTokenCount: 18_000,
+            autoCompactLimit: 244_800,
+            tokenLimitReached: false
+        )
+        store.setCodexCompactionSignalResolverForTesting { threadId in
+            threadId == sessionId ? workingSignal : nil
+        }
+
+        store.refreshCodexCompactionSignalsForTesting()
+
+        XCTAssertEqual(session.task, .working)
+    }
+
     private func makeEvent(
         sessionId: String,
         provider: AgentProvider = .claude,

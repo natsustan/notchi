@@ -18,6 +18,9 @@ final class SessionStore {
     private var resolveCodexMetadata: @Sendable (String) -> CodexThreadMetadata? = { transcriptPath in
         CodexThreadMetadataResolver.metadata(for: transcriptPath)
     }
+    private var resolveCodexCompactionSignal: @Sendable (String) -> CodexCompactionSignal? = { threadId in
+        CodexCompactionSignalResolver.latestSignal(threadId: threadId)
+    }
 
     private init() {}
 
@@ -234,6 +237,16 @@ final class SessionStore {
         }
     }
 
+    func codexCompactionSignalRequests() -> [CodexCompactionSignalRequest] {
+        sessions.values.compactMap { session in
+            guard session.isCodexThreadBacked else { return nil }
+            return CodexCompactionSignalRequest(
+                sessionKey: session.sessionKey,
+                threadId: session.rawSessionId
+            )
+        }
+    }
+
     func resolveCodexThreadMetadata(_ requests: [CodexThreadMetadataRequest]) async -> [CodexThreadMetadataUpdate] {
         let resolver = resolveCodexMetadata
         return await Task.detached(priority: .utility) {
@@ -242,6 +255,18 @@ final class SessionStore {
                     sessionKey: request.sessionKey,
                     transcriptPath: request.transcriptPath,
                     metadata: resolver(request.transcriptPath)
+                )
+            }
+        }.value
+    }
+
+    func resolveCodexCompactionSignals(_ requests: [CodexCompactionSignalRequest]) async -> [CodexCompactionSignalUpdate] {
+        let resolver = resolveCodexCompactionSignal
+        return await Task.detached(priority: .utility) {
+            requests.map { request in
+                CodexCompactionSignalUpdate(
+                    sessionKey: request.sessionKey,
+                    signal: resolver(request.threadId)
                 )
             }
         }.value
@@ -269,6 +294,12 @@ final class SessionStore {
         return archivedSessions
     }
 
+    func applyCodexCompactionSignals(_ updates: [CodexCompactionSignalUpdate]) {
+        for update in updates {
+            sessions[update.sessionKey]?.updateCodexCompactionSignal(update.signal)
+        }
+    }
+
     func recordAssistantMessages(_ messages: [AssistantMessage], for sessionKey: ProviderSessionKey) {
         guard let session = sessions[sessionKey] else { return }
         session.recordAssistantMessages(messages)
@@ -290,13 +321,30 @@ final class SessionStore {
         return applyCodexThreadMetadata(updates)
     }
 
+    func refreshCodexCompactionSignalsForTesting() {
+        let updates = codexCompactionSignalRequests().map { request in
+            CodexCompactionSignalUpdate(
+                sessionKey: request.sessionKey,
+                signal: resolveCodexCompactionSignal(request.threadId)
+            )
+        }
+        applyCodexCompactionSignals(updates)
+    }
+
     func setCodexMetadataResolverForTesting(_ resolver: @escaping @Sendable (String) -> CodexThreadMetadata?) {
         resolveCodexMetadata = resolver
+    }
+
+    func setCodexCompactionSignalResolverForTesting(_ resolver: @escaping @Sendable (String) -> CodexCompactionSignal?) {
+        resolveCodexCompactionSignal = resolver
     }
 
     func resetTestingHooks() {
         resolveCodexMetadata = { transcriptPath in
             CodexThreadMetadataResolver.metadata(for: transcriptPath)
+        }
+        resolveCodexCompactionSignal = { threadId in
+            CodexCompactionSignalResolver.latestSignal(threadId: threadId)
         }
     }
 #endif
@@ -390,6 +438,24 @@ nonisolated struct CodexThreadMetadataUpdate: Sendable, Equatable {
     let sessionKey: ProviderSessionKey
     let transcriptPath: String
     let metadata: CodexThreadMetadata?
+}
+
+nonisolated struct CodexCompactionSignal: Sendable, Equatable {
+    let observedAt: Date
+    let totalUsageTokens: Int
+    let estimatedTokenCount: Int?
+    let autoCompactLimit: Int
+    let tokenLimitReached: Bool
+}
+
+nonisolated struct CodexCompactionSignalRequest: Sendable, Equatable {
+    let sessionKey: ProviderSessionKey
+    let threadId: String
+}
+
+nonisolated struct CodexCompactionSignalUpdate: Sendable, Equatable {
+    let sessionKey: ProviderSessionKey
+    let signal: CodexCompactionSignal?
 }
 
 nonisolated enum CodexThreadMetadataResolver {
@@ -517,5 +583,162 @@ nonisolated enum CodexThreadMetadataResolver {
         }
 
         return String(bytes: bytes, encoding: .utf8)
+    }
+}
+
+nonisolated enum CodexCompactionSignalResolver {
+    private static var codexDirectoryURL: URL {
+        FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".codex", isDirectory: true)
+    }
+
+    private static var logsURL: URL? {
+        guard let entries = try? FileManager.default.contentsOfDirectory(
+            at: codexDirectoryURL,
+            includingPropertiesForKeys: nil
+        ) else {
+            return nil
+        }
+
+        return entries.compactMap { url -> (version: Int, url: URL)? in
+            let name = url.deletingPathExtension().lastPathComponent
+            guard name.hasPrefix("logs_"),
+                  url.pathExtension == "sqlite",
+                  let version = Int(name.dropFirst("logs_".count)) else {
+                return nil
+            }
+            return (version, url)
+        }
+        .max { lhs, rhs in lhs.version < rhs.version }?
+        .url
+    }
+
+    static func latestSignal(threadId: String) -> CodexCompactionSignal? {
+        let trimmedThreadId = threadId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedThreadId.isEmpty,
+              let logsURL,
+              FileManager.default.fileExists(atPath: logsURL.path) else {
+            return nil
+        }
+
+        let escapedThreadId = trimmedThreadId.replacingOccurrences(of: "'", with: "''")
+        let query = """
+        SELECT ts, ts_nanos, feedback_log_body
+        FROM logs
+        WHERE thread_id = '\(escapedThreadId)'
+          AND target = 'codex_core::session::turn'
+          AND feedback_log_body LIKE '%post sampling token usage%'
+        ORDER BY ts DESC, ts_nanos DESC, id DESC
+        LIMIT 1;
+        """
+
+        guard let output = runSQLite(query: query, databasePath: logsURL.path) else {
+            return nil
+        }
+
+        return latestSignal(fromSQLiteOutput: output)
+    }
+
+    static func latestSignal(fromSQLiteOutput output: String) -> CodexCompactionSignal? {
+        guard let row = output.split(separator: "\n", omittingEmptySubsequences: true).first else {
+            return nil
+        }
+
+        let parts = row.split(separator: "\u{1F}", maxSplits: 2, omittingEmptySubsequences: false)
+        guard parts.count == 3,
+              let seconds = TimeInterval(String(parts[0])),
+              let nanoseconds = TimeInterval(String(parts[1])),
+              let signal = parseLogBody(
+                String(parts[2]),
+                observedAt: Date(timeIntervalSince1970: seconds + (nanoseconds / 1_000_000_000))
+              ) else {
+            return nil
+        }
+
+        return signal
+    }
+
+    private static func parseLogBody(_ body: String, observedAt: Date) -> CodexCompactionSignal? {
+        guard let totalUsageTokens = intValue(named: "total_usage_tokens", in: body),
+              let autoCompactLimit = intValue(named: "auto_compact_limit", in: body),
+              let tokenLimitReached = boolValue(named: "token_limit_reached", in: body) else {
+            return nil
+        }
+
+        return CodexCompactionSignal(
+            observedAt: observedAt,
+            totalUsageTokens: totalUsageTokens,
+            estimatedTokenCount: optionalIntValue(named: "estimated_token_count", in: body),
+            autoCompactLimit: autoCompactLimit,
+            tokenLimitReached: tokenLimitReached
+        )
+    }
+
+    private static func intValue(named name: String, in text: String) -> Int? {
+        guard let range = text.range(
+            of: "\(name)=([0-9]+)",
+            options: .regularExpression
+        ) else {
+            return nil
+        }
+
+        let value = text[range].dropFirst(name.count + 1)
+        return Int(value)
+    }
+
+    private static func optionalIntValue(named name: String, in text: String) -> Int? {
+        guard let range = text.range(
+            of: "\(name)=Some\\(([0-9]+)\\)",
+            options: .regularExpression
+        ) else {
+            return nil
+        }
+
+        let matched = text[range]
+        guard let start = matched.firstIndex(of: "("),
+              let end = matched.firstIndex(of: ")") else {
+            return nil
+        }
+
+        return Int(matched[matched.index(after: start)..<end])
+    }
+
+    private static func boolValue(named name: String, in text: String) -> Bool? {
+        guard let range = text.range(
+            of: "\(name)=(true|false)",
+            options: .regularExpression
+        ) else {
+            return nil
+        }
+
+        return text[range].hasSuffix("true")
+    }
+
+    private static func runSQLite(query: String, databasePath: String) -> String? {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        process.arguments = ["-batch", "-noheader", "-separator", "\u{1F}", databasePath, query]
+
+        let stdoutPipe = Pipe()
+        process.standardOutput = stdoutPipe
+        process.standardError = FileHandle.nullDevice
+
+        do {
+            try process.run()
+        } catch {
+            return nil
+        }
+
+        let data = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
+        guard process.terminationStatus == 0 else {
+            return nil
+        }
+
+        let output = String(data: data, encoding: .utf8)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        return output?.isEmpty == false ? output : nil
     }
 }
