@@ -19,6 +19,7 @@ final class NotchiStateMachine {
     private var codexThreadMetadataMonitorTask: Task<Void, Never>?
     private var codexThreadMetadataRefreshTask: Task<Void, Never>?
     private var codexCompactionSignalRefreshTask: Task<Void, Never>?
+    private var codexCompactionSignalRefreshGeneration = 0
     private var codexThreadMetadataImmediateRefreshKeys: Set<ProviderSessionKey> = []
     private var codexThreadMetadataAutoRefreshEnabled = true
     private var codexProcessMissCounts: [ProviderSessionKey: Int] = [:]
@@ -36,7 +37,6 @@ final class NotchiStateMachine {
     private static let codexProcessMonitorInterval: Duration = .seconds(2)
     private static let codexThreadMetadataMonitorInterval: Duration = .seconds(5)
     private static let codexCompactionSignalRefreshDebounce: Duration = .milliseconds(150)
-    private static let codexCompactionSignalFollowUpInterval: Duration = .seconds(1)
     private static let codexProcessMissLimit = 2
     private static let pendingCodexSessionStartMaxAge: TimeInterval = 10 * 60
 
@@ -449,8 +449,7 @@ final class NotchiStateMachine {
             codexThreadMetadataMonitorTask = nil
             codexThreadMetadataRefreshTask?.cancel()
             codexThreadMetadataRefreshTask = nil
-            codexCompactionSignalRefreshTask?.cancel()
-            codexCompactionSignalRefreshTask = nil
+            cancelCodexCompactionSignalRefresh()
             codexThreadMetadataImmediateRefreshKeys.removeAll()
             clearCodexUsage()
         }
@@ -495,17 +494,6 @@ final class NotchiStateMachine {
             self.sessionStore.applyCodexCompactionSignals(signals)
             self.endCodexArchivedSessions(archivedSessions)
             self.refreshCodexThreadMetadataMonitoring()
-            if self.hasActiveCodexCompaction {
-                self.scheduleCodexCompactionSignalRefresh(after: Self.codexCompactionSignalFollowUpInterval)
-            }
-        }
-    }
-
-    private var hasActiveCodexCompaction: Bool {
-        sessionStore.sessions.values.contains { session in
-            session.provider == .codex &&
-                session.isProcessing &&
-                session.task == .compacting
         }
     }
 
@@ -516,35 +504,47 @@ final class NotchiStateMachine {
     private func scheduleCodexCompactionSignalRefresh(after delay: Duration) {
         guard codexThreadMetadataAutoRefreshEnabled else { return }
 
+        codexCompactionSignalRefreshGeneration += 1
+        let generation = codexCompactionSignalRefreshGeneration
         codexCompactionSignalRefreshTask?.cancel()
         codexCompactionSignalRefreshTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard let self, !Task.isCancelled else { return }
-            await self.refreshCodexCompactionSignals()
+            await self.refreshCodexCompactionSignals(generation: generation)
         }
     }
 
-    private func refreshCodexCompactionSignals() async {
+    private func refreshCodexCompactionSignals(generation: Int) async {
         let requests = sessionStore.codexCompactionSignalRequests()
         guard !requests.isEmpty else {
-            codexCompactionSignalRefreshTask = nil
+            clearCodexCompactionSignalRefreshTask(generation: generation)
             refreshCodexThreadMetadataMonitoring()
             return
         }
 
         let signals = await sessionStore.resolveCodexCompactionSignals(requests)
         guard !Task.isCancelled else {
-            codexCompactionSignalRefreshTask = nil
+            clearCodexCompactionSignalRefreshTask(generation: generation)
             return
         }
 
         sessionStore.applyCodexCompactionSignals(signals)
-        codexCompactionSignalRefreshTask = nil
+        clearCodexCompactionSignalRefreshTask(generation: generation)
         refreshCodexThreadMetadataMonitoring()
+    }
 
-        if hasActiveCodexCompaction {
-            scheduleCodexCompactionSignalRefresh(after: Self.codexCompactionSignalFollowUpInterval)
+    private func clearCodexCompactionSignalRefreshTask(generation: Int) {
+        guard generation == codexCompactionSignalRefreshGeneration else {
+            return
         }
+
+        codexCompactionSignalRefreshTask = nil
+    }
+
+    private func cancelCodexCompactionSignalRefresh() {
+        codexCompactionSignalRefreshGeneration += 1
+        codexCompactionSignalRefreshTask?.cancel()
+        codexCompactionSignalRefreshTask = nil
     }
 
     private nonisolated static func defaultCodexProcessAlive(_ processId: Int) -> Bool {
@@ -569,8 +569,7 @@ final class NotchiStateMachine {
         codexThreadMetadataMonitorTask = nil
         codexThreadMetadataRefreshTask?.cancel()
         codexThreadMetadataRefreshTask = nil
-        codexCompactionSignalRefreshTask?.cancel()
-        codexCompactionSignalRefreshTask = nil
+        cancelCodexCompactionSignalRefresh()
         codexThreadMetadataImmediateRefreshKeys.removeAll()
         codexThreadMetadataAutoRefreshEnabled = true
         codexProcessMissCounts.removeAll()

@@ -179,8 +179,28 @@ final class SessionData: Identifiable {
     }
 
     func updateTask(_ newTask: NotchiTask) {
+        if newTask == .working, task == .compacting, hasActiveCodexCompactionSignal {
+            lastActivity = Date()
+            return
+        }
+
         task = newTask
         lastActivity = Date()
+    }
+
+    private var hasActiveCodexCompactionSignal: Bool {
+        guard provider == .codex,
+              isProcessing,
+              let signal = codexCompactionSignal,
+              signal.tokenLimitReached else {
+            return false
+        }
+
+        if let promptSubmitTime, signal.observedAt < promptSubmitTime {
+            return false
+        }
+
+        return true
     }
 
     func updateProcessingState(isProcessing: Bool) {
@@ -198,6 +218,9 @@ final class SessionData: Identifiable {
         }
         lastUserPromptHasAttachments = hasAttachments
         promptSubmitTime = now
+        if provider == .codex {
+            codexCompactionSignal = nil
+        }
         lastActivity = now
         logger.debug("Setting promptSubmitTime to: \(now)")
     }
@@ -246,16 +269,20 @@ final class SessionData: Identifiable {
     func updateCodexCompactionSignal(_ signal: CodexCompactionSignal?) {
         guard provider == .codex else { return }
 
-        codexCompactionSignal = signal
-
-        guard let signal,
-              isProcessing else {
+        guard let signal else {
+            codexCompactionSignal = nil
             return
         }
 
+        // WHY: the latest sqlite row can belong to the previous turn until Codex
+        // writes this turn's usage row, so don't let it re-enter compacting.
         if let promptSubmitTime, signal.observedAt < promptSubmitTime {
             return
         }
+
+        codexCompactionSignal = signal
+
+        guard isProcessing else { return }
 
         if signal.tokenLimitReached {
             updateTask(.compacting)
