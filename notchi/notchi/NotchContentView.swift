@@ -44,6 +44,7 @@ struct NotchContentView: View {
     var panelManager: NotchPanelManager = .shared
     var usageService: ClaudeUsageService = .shared
     var haptics: HapticService = .shared
+    @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @ObservedObject private var updateManager = UpdateManager.shared
     @State private var showingPanelSettings = false
     @State private var showingSessionActivity = false
@@ -53,6 +54,9 @@ struct NotchContentView: View {
     @State private var spriteHandoff: SpriteHandoff?
     @State private var spriteHandoffProgress: CGFloat = 0
     @State private var spriteHandoffGeneration = 0
+    @State private var launchGlowVisible = false
+    @State private var launchGlowProgress: Double = 0
+    @MainActor private static var hasPlayedLaunchGlow = false
 
     private var sessionStore: SessionStore {
         stateMachine.sessionStore
@@ -255,6 +259,18 @@ struct NotchContentView: View {
             }
         }
         .clipShape(notchClipShape)
+        .overlay {
+            if !isExpanded && launchGlowVisible {
+                LaunchIridescentGlow(
+                    progress: launchGlowProgress,
+                    topCornerRadius: topCornerRadius,
+                    bottomCornerRadius: bottomCornerRadius,
+                    systemNotchPath: panelManager.systemNotchPath,
+                    reduceMotion: accessibilityReduceMotion
+                )
+                .padding(-LaunchIridescentGlow.bleed)
+            }
+        }
         .shadow(
             color: isExpanded
                 ? .black.opacity(0.7)
@@ -265,6 +281,7 @@ struct NotchContentView: View {
         .animation(panelAnimation, value: isExpanded)
         .animation(.easeInOut(duration: 0.18), value: collapsedMode)
         .animation(collapsedHoverAnimation, value: panelManager.isCollapsedHovered)
+        .onAppear(perform: startLaunchGlow)
         .onReceive(NotificationCenter.default.publisher(for: .notchiShouldCollapse)) { _ in
             panelManager.collapse()
         }
@@ -449,6 +466,28 @@ struct NotchContentView: View {
             guard generation == spriteHandoffGeneration else { return }
             spriteHandoff = nil
             spriteHandoffProgress = 0
+        }
+    }
+
+    private func startLaunchGlow() {
+        guard !Self.hasPlayedLaunchGlow else { return }
+        Self.hasPlayedLaunchGlow = true
+
+        guard !accessibilityReduceMotion else { return }
+
+        let duration = LaunchIridescentGlowTiming.duration(reduceMotion: accessibilityReduceMotion)
+        launchGlowProgress = 0
+        launchGlowVisible = true
+
+        Task {
+            // Commit the hidden 0 state before animating so the glow blooms from nothing.
+            await Task.yield()
+            withAnimation(.linear(duration: duration)) {
+                launchGlowProgress = 1
+            }
+
+            try? await Task.sleep(for: .seconds(duration))
+            launchGlowVisible = false
         }
     }
 
