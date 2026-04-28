@@ -33,18 +33,45 @@ private enum HookInstallBadgeState {
 }
 
 struct PanelSettingsView: View {
+    @Binding private var showingEmotionAnalysisSettings: Bool
     @AppStorage(AppSettings.hideSpriteWhenIdleKey) private var hideSpriteWhenIdle = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var claudeHooksInstalled = IntegrationCoordinator.shared.isInstalled(for: .claude)
     @State private var claudeHooksError = false
     @State private var codexHooksInstalled = IntegrationCoordinator.shared.isInstalled(for: .codex)
     @State private var codexHooksError = false
-    @State private var apiKeyInput = AppSettings.anthropicApiKey ?? ""
     @ObservedObject private var updateManager = UpdateManager.shared
     private var usageConnected: Bool { ClaudeUsageService.shared.isConnected }
-    private var hasApiKey: Bool { !apiKeyInput.isEmpty }
+
+    init(showingEmotionAnalysisSettings: Binding<Bool> = .constant(false)) {
+        _showingEmotionAnalysisSettings = showingEmotionAnalysisSettings
+    }
 
     var body: some View {
+        ZStack {
+            if !showingEmotionAnalysisSettings {
+                mainSettings
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .leading).combined(with: .opacity),
+                        removal: .move(edge: .leading).combined(with: .opacity)
+                    ))
+            }
+
+            if showingEmotionAnalysisSettings {
+                EmotionAnalysisSettingsView()
+                    .transition(.asymmetric(
+                        insertion: .move(edge: .trailing).combined(with: .opacity),
+                        removal: .move(edge: .trailing).combined(with: .opacity)
+                    ))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: showingEmotionAnalysisSettings)
+        .padding(.horizontal, SettingsLayout.panelHorizontalPadding)
+        .padding(.top, SettingsLayout.topPadding)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var mainSettings: some View {
         VStack(alignment: .leading, spacing: 0) {
             ScrollView {
                 VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
@@ -62,8 +89,6 @@ struct PanelSettingsView: View {
 
             quitSection
         }
-        .padding(.horizontal, SettingsLayout.panelHorizontalPadding)
-        .padding(.top, SettingsLayout.topPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
@@ -121,53 +146,23 @@ struct PanelSettingsView: View {
             }
             .buttonStyle(.plain)
 
-            apiKeyRow
+            emotionAnalysisRow
         }
     }
 
-    private var apiKeyRow: some View {
-        VStack(alignment: .leading, spacing: SettingsLayout.apiKeySpacing) {
+    private var emotionAnalysisRow: some View {
+        Button(action: { showingEmotionAnalysisSettings = true }) {
             SettingsRowView(icon: "brain", title: "Emotion Analysis") {
-                statusBadge(
-                    hasApiKey ? "Active" : "No Key",
-                    color: hasApiKey ? TerminalColors.green : TerminalColors.red
-                )
-            }
-
-            HStack(spacing: 6) {
-                SecureField("", text: $apiKeyInput)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(TerminalColors.primaryText)
-                    .padding(.horizontal, SettingsLayout.fieldHorizontalPadding)
-                    .padding(.vertical, SettingsLayout.fieldVerticalPadding)
-                    .background(Color.white.opacity(0.06))
-                    .cornerRadius(6)
-                    .onSubmit { saveApiKey() }
-                    .overlay(alignment: .leading) {
-                        if apiKeyInput.isEmpty {
-                            Text("Anthropic API Key")
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(TerminalColors.dimmedText)
-                                .padding(.leading, SettingsLayout.fieldHorizontalPadding)
-                                .allowsHitTesting(false)
-                        }
-                    }
-
-                Button(action: saveApiKey) {
-                    Image(systemName: hasApiKey ? "checkmark.circle.fill" : "arrow.right.circle")
-                        .font(.system(size: 14))
-                        .foregroundColor(hasApiKey ? TerminalColors.green : TerminalColors.dimmedText)
+                HStack(spacing: 6) {
+                    let status = emotionAnalysisStatus()
+                    statusBadge(status.text, color: status.color)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundColor(TerminalColors.dimmedText)
                 }
-                .buttonStyle(.plain)
             }
-            .padding(.leading, SettingsLayout.fieldLeadingInset)
         }
-    }
-
-    private func saveApiKey() {
-        let trimmed = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
-        AppSettings.anthropicApiKey = trimmed.isEmpty ? nil : trimmed
+        .buttonStyle(.plain)
     }
 
     private var aboutSection: some View {
@@ -316,6 +311,26 @@ struct PanelSettingsView: View {
             .frame(maxWidth: 160, alignment: .trailing)
     }
 
+    private func emotionAnalysisStatus() -> (text: String, color: Color) {
+        let provider = AppSettings.emotionAnalysisProvider
+        if hasStoredApiKey(for: provider) {
+            return (provider.displayName, TerminalColors.green)
+        }
+
+        if provider == .claude,
+           ClaudeSettingsConfig.existsAtDefaultLocation() {
+            return ("Claude Code", TerminalColors.green)
+        }
+
+        return ("No Key", TerminalColors.red)
+    }
+
+    private func hasStoredApiKey(for provider: EmotionAnalysisProvider) -> Bool {
+        AppSettings.apiKey(for: provider)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .isEmpty == false
+    }
+
     @ViewBuilder
     private var updateStatusView: some View {
         switch updateManager.state {
@@ -348,6 +363,253 @@ struct PanelSettingsView: View {
                 .font(.system(size: 10))
                 .foregroundColor(TerminalColors.dimmedText)
         }
+    }
+}
+
+private struct EmotionAnalysisSettingsView: View {
+    @State private var provider = AppSettings.emotionAnalysisProvider
+    @State private var model = AppSettings.selectedEmotionAnalysisModel(for: AppSettings.emotionAnalysisProvider)
+    @State private var apiKeyInput = AppSettings.apiKey(for: AppSettings.emotionAnalysisProvider) ?? ""
+    @State private var isProviderPickerExpanded = false
+    @State private var isModelPickerExpanded = false
+
+    private var hasApiKey: Bool {
+        !apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+                    providerSection
+                    modelSection
+                    apiKeySection
+                }
+                .padding(.top, SettingsLayout.topPadding)
+            }
+            .scrollIndicators(.hidden)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .onDisappear {
+            saveApiKey(for: provider)
+        }
+        .animation(.spring(response: 0.3), value: isProviderPickerExpanded)
+        .animation(.spring(response: 0.3), value: isModelPickerExpanded)
+    }
+
+    private var providerSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: { isProviderPickerExpanded.toggle() }) {
+                SettingsRowView(icon: "switch.2", title: "Provider") {
+                    HStack(spacing: 4) {
+                        Text(provider.displayName)
+                            .font(.system(size: 11))
+                            .foregroundColor(TerminalColors.secondaryText)
+                        Image(systemName: isProviderPickerExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9))
+                            .foregroundColor(TerminalColors.dimmedText)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            if isProviderPickerExpanded {
+                providerPicker
+            }
+        }
+    }
+
+    private var providerPicker: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(EmotionAnalysisProvider.allCases) { option in
+                    providerRow(option)
+                }
+            }
+            .padding(.vertical, SettingsLayout.pickerInset)
+        }
+        .frame(height: pickerHeight(optionCount: EmotionAnalysisProvider.allCases.count))
+        .background(TerminalColors.subtleBackground)
+        .cornerRadius(8)
+        .padding(.top, SettingsLayout.pickerInset)
+    }
+
+    private func providerRow(_ option: EmotionAnalysisProvider) -> some View {
+        Button(action: { selectProvider(option) }) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(provider == option ? TerminalColors.green : Color.clear)
+                    .frame(width: 6, height: 6)
+
+                Text(option.displayName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(provider == option ? TerminalColors.primaryText : TerminalColors.secondaryText)
+                    .lineLimit(1)
+
+                Spacer()
+            }
+            .padding(.horizontal, SettingsLayout.pickerOptionHorizontalPadding)
+            .padding(.vertical, SettingsLayout.pickerOptionVerticalPadding)
+            .background(provider == option ? TerminalColors.hoverBackground : Color.clear)
+            .cornerRadius(4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var apiKeySection: some View {
+        VStack(alignment: .leading, spacing: SettingsLayout.apiKeySpacing) {
+            SettingsRowView(icon: "key", title: "API Key") {
+                statusBadge(hasApiKey ? "Saved" : fallbackStatusText, color: hasApiKey ? TerminalColors.green : fallbackStatusColor)
+            }
+
+            HStack(spacing: 6) {
+                SecureField("", text: $apiKeyInput)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(TerminalColors.primaryText)
+                    .padding(.horizontal, SettingsLayout.fieldHorizontalPadding)
+                    .padding(.vertical, SettingsLayout.fieldVerticalPadding)
+                    .background(Color.white.opacity(0.06))
+                    .cornerRadius(6)
+                    .onSubmit { saveApiKey(for: provider) }
+                    .overlay(alignment: .leading) {
+                        if apiKeyInput.isEmpty {
+                            Text(provider.apiKeyPlaceholder)
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(TerminalColors.dimmedText)
+                                .padding(.leading, SettingsLayout.fieldHorizontalPadding)
+                                .allowsHitTesting(false)
+                        }
+                    }
+
+                Button(action: { saveApiKey(for: provider) }) {
+                    Image(systemName: hasApiKey ? "checkmark.circle.fill" : "arrow.right.circle")
+                        .font(.system(size: 14))
+                        .foregroundColor(hasApiKey ? TerminalColors.green : TerminalColors.dimmedText)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.leading, SettingsLayout.fieldLeadingInset)
+        }
+    }
+
+    private var modelSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button(action: { isModelPickerExpanded.toggle() }) {
+                SettingsRowView(icon: "cpu", title: "Model") {
+                    HStack(spacing: 4) {
+                        Text(model.displayName)
+                            .font(.system(size: 11))
+                            .foregroundColor(TerminalColors.secondaryText)
+                        Image(systemName: isModelPickerExpanded ? "chevron.up" : "chevron.down")
+                            .font(.system(size: 9))
+                            .foregroundColor(TerminalColors.dimmedText)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+
+            if isModelPickerExpanded {
+                modelPicker
+            }
+        }
+    }
+
+    private var modelPicker: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(EmotionAnalysisModel.models(for: provider)) { option in
+                    modelRow(option)
+                }
+            }
+            .padding(.vertical, SettingsLayout.pickerInset)
+        }
+        .frame(height: pickerHeight(optionCount: EmotionAnalysisModel.models(for: provider).count))
+        .background(TerminalColors.subtleBackground)
+        .cornerRadius(8)
+        .padding(.top, SettingsLayout.pickerInset)
+    }
+
+    private func modelRow(_ option: EmotionAnalysisModel) -> some View {
+        Button(action: { selectModel(option) }) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(model == option ? TerminalColors.green : Color.clear)
+                    .frame(width: 6, height: 6)
+
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(option.displayName)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(model == option ? TerminalColors.primaryText : TerminalColors.secondaryText)
+                    Text(option.detail)
+                        .font(.system(size: 9))
+                        .foregroundColor(TerminalColors.dimmedText)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, SettingsLayout.pickerOptionHorizontalPadding)
+            .padding(.vertical, SettingsLayout.pickerOptionVerticalPadding)
+            .background(model == option ? TerminalColors.hoverBackground : Color.clear)
+            .cornerRadius(4)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func pickerHeight(optionCount: Int) -> CGFloat {
+        let rowHeight: CGFloat = 28
+        let rowSpacing: CGFloat = 4
+        let visibleCount = min(optionCount, 6)
+        return CGFloat(visibleCount) * rowHeight + CGFloat(max(visibleCount - 1, 0)) * rowSpacing
+    }
+
+    private var fallbackStatusText: String {
+        if provider == .claude, hasClaudeCodeFallback {
+            return "Claude Code"
+        }
+        return "Missing"
+    }
+
+    private var fallbackStatusColor: Color {
+        provider == .claude && hasClaudeCodeFallback ? TerminalColors.green : TerminalColors.red
+    }
+
+    private var hasClaudeCodeFallback: Bool {
+        ClaudeSettingsConfig.existsAtDefaultLocation()
+    }
+
+    private func selectProvider(_ newProvider: EmotionAnalysisProvider) {
+        guard newProvider != provider else { return }
+        saveApiKey(for: provider)
+        provider = newProvider
+        AppSettings.emotionAnalysisProvider = newProvider
+        model = AppSettings.selectedEmotionAnalysisModel(for: newProvider)
+        apiKeyInput = AppSettings.apiKey(for: newProvider) ?? ""
+    }
+
+    private func selectModel(_ newModel: EmotionAnalysisModel) {
+        model = newModel
+        AppSettings.setEmotionAnalysisModel(newModel, for: provider)
+    }
+
+    private func saveApiKey(for provider: EmotionAnalysisProvider) {
+        let trimmed = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+        AppSettings.setApiKey(trimmed.isEmpty ? nil : trimmed, for: provider)
+    }
+
+    private func statusBadge(_ text: String, color: Color) -> some View {
+        Text(text)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(color)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.15))
+            .cornerRadius(4)
+            .frame(maxWidth: 160, alignment: .trailing)
     }
 }
 

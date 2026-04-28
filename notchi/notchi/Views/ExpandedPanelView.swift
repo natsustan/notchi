@@ -163,6 +163,7 @@ struct ExpandedPanelView: View {
     let usageService: ClaudeUsageService
     let codexUsageService: CodexUsageService
     @Binding var showingSettings: Bool
+    @Binding var showingSettingsDetail: Bool
     @Binding var showingSessionActivity: Bool
     @Binding var isActivityCollapsed: Bool
     @Binding var hoveredSessionId: String?
@@ -172,6 +173,7 @@ struct ExpandedPanelView: View {
         usageService: ClaudeUsageService,
         codexUsageService: CodexUsageService,
         showingSettings: Binding<Bool>,
+        showingSettingsDetail: Binding<Bool>,
         showingSessionActivity: Binding<Bool>,
         isActivityCollapsed: Binding<Bool>,
         hoveredSessionId: Binding<String?>
@@ -180,6 +182,7 @@ struct ExpandedPanelView: View {
         self.usageService = usageService
         self.codexUsageService = codexUsageService
         _showingSettings = showingSettings
+        _showingSettingsDetail = showingSettingsDetail
         _showingSessionActivity = showingSessionActivity
         _isActivityCollapsed = isActivityCollapsed
         _hoveredSessionId = hoveredSessionId
@@ -337,7 +340,7 @@ struct ExpandedPanelView: View {
                 }
 
                 if showingSettings {
-                    PanelSettingsView()
+                    PanelSettingsView(showingEmotionAnalysisSettings: $showingSettingsDetail)
                         .frame(width: geometry.size.width)
                         .transition(settingsContentTransition)
                 }
@@ -347,6 +350,7 @@ struct ExpandedPanelView: View {
         .animation(.easeInOut(duration: 0.25), value: shouldShowSessionPicker)
         .onChange(of: showingSettings) { _, isShowing in
             if !isShowing {
+                showingSettingsDetail = false
                 UpdateManager.shared.clearTransientStatus()
             }
         }

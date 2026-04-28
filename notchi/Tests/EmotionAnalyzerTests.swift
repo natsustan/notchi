@@ -59,6 +59,23 @@ final class EmotionAnalyzerTests: XCTestCase {
         )
     }
 
+    func testCuratedEmotionModelsAreProviderScoped() {
+        XCTAssertEqual(
+            EmotionAnalysisModel.models(for: .claude),
+            [.claudeHaiku45, .claudeSonnet46]
+        )
+        XCTAssertEqual(
+            EmotionAnalysisModel.models(for: .openAI),
+            [.openAIGPT54Nano, .openAIGPT54Mini]
+        )
+    }
+
+    func testDefaultEmotionModelsStayFastAndCheap() {
+        XCTAssertEqual(ClaudeSettingsConfig.defaultModel, EmotionAnalysisModel.claudeHaiku45.rawValue)
+        XCTAssertEqual(EmotionAnalysisModel.defaultModel(for: .claude), .claudeHaiku45)
+        XCTAssertEqual(EmotionAnalysisModel.defaultModel(for: .openAI), .openAIGPT54Nano)
+    }
+
     func testLoadClaudeSettingsConfigReadsCustomResolvedSettingsFile() throws {
         let settingsURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("\(UUID().uuidString)-settings.json")
@@ -72,7 +89,7 @@ final class EmotionAnalyzerTests: XCTestCase {
             try? FileManager.default.removeItem(at: settingsURL)
         }
 
-        let config = EmotionAnalyzer.loadClaudeSettingsConfig(from: settingsURL)
+        let config = ClaudeSettingsConfig.load(from: settingsURL)
 
         XCTAssertEqual(config?.apiURL, URL(string: "https://example.com/proxy/v1/messages"))
         XCTAssertEqual(config?.apiKey, "token-xyz")
