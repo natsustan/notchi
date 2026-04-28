@@ -111,6 +111,40 @@ private struct EmotionResponse: Decodable {
     let intensity: Double
 }
 
+struct EmotionAnalysisTestResult {
+    let emotion: String
+    let intensity: Double
+    let latencyMilliseconds: Int
+}
+
+enum EmotionAnalysisRequestError: LocalizedError {
+    case missingAPIKey(EmotionAnalysisProvider)
+    case httpStatus(provider: String, statusCode: Int)
+    case invalidResponse
+
+    var errorDescription: String? {
+        switch self {
+        case .missingAPIKey(let provider):
+            "Missing \(provider.displayName) API key"
+        case .httpStatus(let provider, let statusCode):
+            "\(provider) API returned HTTP \(statusCode)"
+        case .invalidResponse:
+            "Invalid emotion analysis response"
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .missingAPIKey:
+            "Missing"
+        case .httpStatus(_, let statusCode):
+            "HTTP \(statusCode)"
+        case .invalidResponse:
+            "Invalid"
+        }
+    }
+}
+
 private struct EmotionAnalysisResponseParser {
     private static let validEmotions: Set<String> = ["happy", "sad", "neutral"]
 
@@ -179,18 +213,18 @@ private struct ClaudeEmotionAnalysisProvider: EmotionAnalysisProviding {
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
+            throw EmotionAnalysisRequestError.invalidResponse
         }
 
         guard httpResponse.statusCode == 200 else {
             logger.warning("Claude API returned HTTP \(httpResponse.statusCode)")
-            throw URLError(.badServerResponse)
+            throw EmotionAnalysisRequestError.httpStatus(provider: providerName, statusCode: httpResponse.statusCode)
         }
 
         let haikuResponse = try JSONDecoder().decode(HaikuResponse.self, from: data)
 
         guard let text = haikuResponse.content.first?.text else {
-            throw URLError(.cannotParseResponse)
+            throw EmotionAnalysisRequestError.invalidResponse
         }
 
         logger.debug("Claude raw response: \(text, privacy: .private)")
@@ -247,18 +281,18 @@ private struct OpenAIEmotionAnalysisProvider: EmotionAnalysisProviding {
         let (data, response) = try await URLSession.shared.data(for: request)
 
         guard let httpResponse = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
+            throw EmotionAnalysisRequestError.invalidResponse
         }
 
         guard httpResponse.statusCode == 200 else {
             logger.warning("OpenAI API returned HTTP \(httpResponse.statusCode)")
-            throw URLError(.badServerResponse)
+            throw EmotionAnalysisRequestError.httpStatus(provider: providerName, statusCode: httpResponse.statusCode)
         }
 
         let chatResponse = try JSONDecoder().decode(OpenAIChatCompletionResponse.self, from: data)
 
         guard let text = chatResponse.choices.first?.message.content else {
-            throw URLError(.cannotParseResponse)
+            throw EmotionAnalysisRequestError.invalidResponse
         }
 
         logger.debug("OpenAI raw response: \(text, privacy: .private)")
@@ -280,6 +314,7 @@ final class EmotionAnalyzer {
         Intensity: 0.0 (barely noticeable) to 1.0 (very strong). ALL CAPS text indicates stronger emotion — increase intensity by 0.2-0.3 compared to the same message in lowercase.
         Reply with ONLY valid JSON: {"emotion": "...", "intensity": ...}
         """
+    private static let testPrompt = "Thanks, this looks great!"
 
     private init() {}
 
@@ -346,5 +381,62 @@ final class EmotionAnalyzer {
             apiKey: apiKey,
             model: AppSettings.selectedEmotionAnalysisModel(for: .openAI).rawValue
         )
+    }
+
+    func testConfiguration(
+        provider: EmotionAnalysisProvider,
+        model: EmotionAnalysisModel,
+        apiKey: String?
+    ) async throws -> EmotionAnalysisTestResult {
+        let analysisProvider = try resolveProvider(provider: provider, model: model, apiKey: apiKey)
+        let start = ContinuousClock.now
+        let result = try await analysisProvider.analyze(prompt: Self.testPrompt, systemPrompt: Self.systemPrompt)
+        let elapsed = (ContinuousClock.now - start).components
+        let latency = Int(elapsed.seconds * 1_000 + elapsed.attoseconds / 1_000_000_000_000_000)
+
+        return EmotionAnalysisTestResult(
+            emotion: result.emotion,
+            intensity: result.intensity,
+            latencyMilliseconds: latency
+        )
+    }
+
+    private func resolveProvider(
+        provider: EmotionAnalysisProvider,
+        model: EmotionAnalysisModel,
+        apiKey: String?
+    ) throws -> EmotionAnalysisProviding {
+        let trimmedKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        switch provider {
+        case .claude:
+            if !trimmedKey.isEmpty {
+                return ClaudeEmotionAnalysisProvider(
+                    apiURL: ClaudeSettingsConfig.defaultAPIURL,
+                    apiKey: trimmedKey,
+                    model: model.rawValue
+                )
+            }
+
+            if let config = ClaudeSettingsConfig.loadFromDefaultLocation() {
+                return ClaudeEmotionAnalysisProvider(
+                    apiURL: config.apiURL,
+                    apiKey: config.apiKey,
+                    model: model.rawValue
+                )
+            }
+
+            throw EmotionAnalysisRequestError.missingAPIKey(provider)
+        case .openAI:
+            guard !trimmedKey.isEmpty else {
+                throw EmotionAnalysisRequestError.missingAPIKey(provider)
+            }
+
+            return OpenAIEmotionAnalysisProvider(
+                apiURL: OpenAISettingsConfig.defaultAPIURL,
+                apiKey: trimmedKey,
+                model: model.rawValue
+            )
+        }
     }
 }

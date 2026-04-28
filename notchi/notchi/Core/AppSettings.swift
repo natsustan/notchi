@@ -23,6 +23,15 @@ enum EmotionAnalysisProvider: String, CaseIterable, Identifiable {
             "OpenAI API Key"
         }
     }
+
+    var apiKeyURL: URL {
+        switch self {
+        case .claude:
+            URL(string: "https://console.anthropic.com/settings/keys")!
+        case .openAI:
+            URL(string: "https://platform.openai.com/api-keys")!
+        }
+    }
 }
 
 enum EmotionAnalysisModel: String, CaseIterable, Identifiable {
@@ -52,15 +61,6 @@ enum EmotionAnalysisModel: String, CaseIterable, Identifiable {
             "GPT-5.4 nano"
         case .openAIGPT54Mini:
             "GPT-5.4 mini"
-        }
-    }
-
-    var detail: String {
-        switch self {
-        case .claudeHaiku45, .openAIGPT54Nano:
-            "Fastest"
-        case .claudeSonnet46, .openAIGPT54Mini:
-            "Balanced"
         }
     }
 

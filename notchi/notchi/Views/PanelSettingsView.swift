@@ -81,7 +81,6 @@ struct PanelSettingsView: View {
                     Divider().background(Color.white.opacity(0.08))
                     aboutSection
                 }
-                .padding(.top, SettingsLayout.topPadding)
             }
             .scrollIndicators(.hidden)
 
@@ -367,11 +366,19 @@ struct PanelSettingsView: View {
 }
 
 private struct EmotionAnalysisSettingsView: View {
+    private enum TestState {
+        case idle
+        case testing
+        case success(EmotionAnalysisTestResult)
+        case failure(String)
+    }
+
     @State private var provider = AppSettings.emotionAnalysisProvider
     @State private var model = AppSettings.selectedEmotionAnalysisModel(for: AppSettings.emotionAnalysisProvider)
     @State private var apiKeyInput = AppSettings.apiKey(for: AppSettings.emotionAnalysisProvider) ?? ""
     @State private var isProviderPickerExpanded = false
     @State private var isModelPickerExpanded = false
+    @State private var testState: TestState = .idle
 
     private var hasApiKey: Bool {
         !apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -379,15 +386,17 @@ private struct EmotionAnalysisSettingsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
-                    providerSection
-                    modelSection
-                    apiKeySection
-                }
-                .padding(.top, SettingsLayout.topPadding)
+            VStack(alignment: .leading, spacing: SettingsLayout.sectionSpacing) {
+                descriptionSection
+                providerSection
+                modelSection
+                apiKeySection
+                testSection
             }
-            .scrollIndicators(.hidden)
+
+            Spacer(minLength: SettingsLayout.sectionSpacing)
+
+            setupSection
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onDisappear {
@@ -395,6 +404,16 @@ private struct EmotionAnalysisSettingsView: View {
         }
         .animation(.spring(response: 0.3), value: isProviderPickerExpanded)
         .animation(.spring(response: 0.3), value: isModelPickerExpanded)
+        .onChange(of: apiKeyInput) { _, _ in
+            resetTestState()
+        }
+    }
+
+    private var descriptionSection: some View {
+        Text("Prompts are sent to the selected provider for emotion classification.")
+            .font(.system(size: 10))
+            .foregroundColor(TerminalColors.dimmedText)
+            .fixedSize(horizontal: false, vertical: true)
     }
 
     private var providerSection: some View {
@@ -458,12 +477,37 @@ private struct EmotionAnalysisSettingsView: View {
     }
 
     private var apiKeySection: some View {
-        VStack(alignment: .leading, spacing: SettingsLayout.apiKeySpacing) {
-            SettingsRowView(icon: "key", title: "API Key") {
-                statusBadge(hasApiKey ? "Saved" : fallbackStatusText, color: hasApiKey ? TerminalColors.green : fallbackStatusColor)
-            }
+        HStack {
+            Image(systemName: "key")
+                .font(.system(size: 12))
+                .foregroundColor(TerminalColors.secondaryText)
+                .frame(width: 20)
 
-            HStack(spacing: 6) {
+            Text("API Key")
+                .font(.system(size: 12))
+                .foregroundColor(TerminalColors.primaryText)
+                .layoutPriority(1)
+
+            Spacer(minLength: 12)
+
+            apiKeyStatusView
+            apiKeyField
+        }
+        .padding(.vertical, SettingsLayout.rowVerticalPadding)
+    }
+
+    @ViewBuilder
+    private var apiKeyStatusView: some View {
+        if hasApiKey {
+            statusBadge("Saved", color: TerminalColors.green)
+        } else if provider == .claude, hasClaudeCodeFallback {
+            statusBadge("Claude Code", color: TerminalColors.green)
+        }
+    }
+
+    private var apiKeyField: some View {
+        HStack(spacing: 6) {
+            ZStack(alignment: .leading) {
                 SecureField("", text: $apiKeyInput)
                     .textFieldStyle(.plain)
                     .font(.system(size: 11, design: .monospaced))
@@ -473,24 +517,62 @@ private struct EmotionAnalysisSettingsView: View {
                     .background(Color.white.opacity(0.06))
                     .cornerRadius(6)
                     .onSubmit { saveApiKey(for: provider) }
-                    .overlay(alignment: .leading) {
-                        if apiKeyInput.isEmpty {
-                            Text(provider.apiKeyPlaceholder)
-                                .font(.system(size: 11, design: .monospaced))
-                                .foregroundColor(TerminalColors.dimmedText)
-                                .padding(.leading, SettingsLayout.fieldHorizontalPadding)
-                                .allowsHitTesting(false)
-                        }
-                    }
 
-                Button(action: { saveApiKey(for: provider) }) {
-                    Image(systemName: hasApiKey ? "checkmark.circle.fill" : "arrow.right.circle")
-                        .font(.system(size: 14))
-                        .foregroundColor(hasApiKey ? TerminalColors.green : TerminalColors.dimmedText)
+                if apiKeyInput.isEmpty {
+                    Text(provider.apiKeyPlaceholder)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(TerminalColors.dimmedText)
+                        .padding(.leading, SettingsLayout.fieldHorizontalPadding)
+                        .allowsHitTesting(false)
                 }
-                .buttonStyle(.plain)
             }
-            .padding(.leading, SettingsLayout.fieldLeadingInset)
+            .frame(minWidth: 220, maxWidth: 300)
+
+            Button(action: { saveApiKey(for: provider) }) {
+                Image(systemName: hasApiKey ? "checkmark.circle.fill" : "arrow.right.circle")
+                    .font(.system(size: 14))
+                    .foregroundColor(hasApiKey ? TerminalColors.green : TerminalColors.dimmedText)
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    private var setupSection: some View {
+        Button(action: openAPIKeyPage) {
+            SettingsRowView(icon: "arrow.up.right.square", title: "Get API Key") {
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 10))
+                    .foregroundColor(TerminalColors.dimmedText)
+            }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var testSection: some View {
+        Button(action: testEmotionAnalysis) {
+            SettingsRowView(icon: "bolt.horizontal", title: "Test") {
+                testStatusView
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(isTesting)
+    }
+
+    @ViewBuilder
+    private var testStatusView: some View {
+        switch testState {
+        case .idle:
+            Image(systemName: "play.circle")
+                .font(.system(size: 13))
+                .foregroundColor(canTest ? TerminalColors.dimmedText : TerminalColors.red)
+        case .testing:
+            ProgressView()
+                .controlSize(.mini)
+                .frame(width: 16, height: 16)
+        case .success(let result):
+            statusBadge(testResultText(result), color: TerminalColors.green)
+        case .failure(let message):
+            statusBadge(message, color: TerminalColors.red)
         }
     }
 
@@ -538,14 +620,10 @@ private struct EmotionAnalysisSettingsView: View {
                     .fill(model == option ? TerminalColors.green : Color.clear)
                     .frame(width: 6, height: 6)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(option.displayName)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(model == option ? TerminalColors.primaryText : TerminalColors.secondaryText)
-                    Text(option.detail)
-                        .font(.system(size: 9))
-                        .foregroundColor(TerminalColors.dimmedText)
-                }
+                Text(option.displayName)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(model == option ? TerminalColors.primaryText : TerminalColors.secondaryText)
+                    .lineLimit(1)
 
                 Spacer()
             }
@@ -580,6 +658,17 @@ private struct EmotionAnalysisSettingsView: View {
         ClaudeSettingsConfig.existsAtDefaultLocation()
     }
 
+    private var canTest: Bool {
+        hasApiKey || (provider == .claude && hasClaudeCodeFallback)
+    }
+
+    private var isTesting: Bool {
+        if case .testing = testState {
+            return true
+        }
+        return false
+    }
+
     private func selectProvider(_ newProvider: EmotionAnalysisProvider) {
         guard newProvider != provider else { return }
         saveApiKey(for: provider)
@@ -587,16 +676,81 @@ private struct EmotionAnalysisSettingsView: View {
         AppSettings.emotionAnalysisProvider = newProvider
         model = AppSettings.selectedEmotionAnalysisModel(for: newProvider)
         apiKeyInput = AppSettings.apiKey(for: newProvider) ?? ""
+        resetTestState()
     }
 
     private func selectModel(_ newModel: EmotionAnalysisModel) {
         model = newModel
         AppSettings.setEmotionAnalysisModel(newModel, for: provider)
+        resetTestState()
     }
 
     private func saveApiKey(for provider: EmotionAnalysisProvider) {
         let trimmed = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
         AppSettings.setApiKey(trimmed.isEmpty ? nil : trimmed, for: provider)
+    }
+
+    private func openAPIKeyPage() {
+        NSWorkspace.shared.open(provider.apiKeyURL)
+    }
+
+    private func testEmotionAnalysis() {
+        guard !isTesting else { return }
+        testState = .testing
+
+        let currentProvider = provider
+        let currentModel = model
+        let currentAPIKey = apiKeyInput
+
+        Task { @MainActor in
+            do {
+                let result = try await EmotionAnalyzer.shared.testConfiguration(
+                    provider: currentProvider,
+                    model: currentModel,
+                    apiKey: currentAPIKey
+                )
+                guard isCurrentTestSnapshot(provider: currentProvider, model: currentModel, apiKey: currentAPIKey) else { return }
+                testState = .success(result)
+            } catch {
+                guard isCurrentTestSnapshot(provider: currentProvider, model: currentModel, apiKey: currentAPIKey) else { return }
+                testState = .failure(testErrorText(error))
+            }
+        }
+    }
+
+    private func resetTestState() {
+        testState = .idle
+    }
+
+    private func isCurrentTestSnapshot(
+        provider: EmotionAnalysisProvider,
+        model: EmotionAnalysisModel,
+        apiKey: String
+    ) -> Bool {
+        self.provider == provider && self.model == model && apiKeyInput == apiKey
+    }
+
+    private func testResultText(_ result: EmotionAnalysisTestResult) -> String {
+        "\(result.emotion.capitalized) \(String(format: "%.2f", result.intensity)) / \(result.latencyMilliseconds)ms"
+    }
+
+    private func testErrorText(_ error: Error) -> String {
+        if let requestError = error as? EmotionAnalysisRequestError {
+            return requestError.shortLabel
+        }
+
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet:
+                return "Offline"
+            case .timedOut:
+                return "Timeout"
+            default:
+                return "Failed"
+            }
+        }
+
+        return "Failed"
     }
 
     private func statusBadge(_ text: String, color: Color) -> some View {
