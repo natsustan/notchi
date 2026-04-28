@@ -310,6 +310,18 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(signals[secondThreadId]?.totalUsageTokens, 20_000)
     }
 
+    func testCodexCompactionSignalResolverIgnoresMalformedThreadIdsFromSQLiteOutput() {
+        let separator = "\u{1F}"
+        let body = """
+        session_loop{thread_id=not-a-uuid}:turn:run_turn: post sampling token usage turn_id=turn total_usage_tokens=256300 estimated_token_count=Some(177642) auto_compact_limit=244800 token_limit_reached=true
+        """
+        let output = "not-a-uuid\(separator)1775000000\(separator)0\(separator)\(body)"
+
+        let signals = CodexCompactionSignalResolver.latestSignals(fromSQLiteOutput: output)
+
+        XCTAssertTrue(signals.isEmpty)
+    }
+
     func testRefreshCodexCompactionSignalsMarksCurrentProcessingCodexSessionCompacting() {
         let store = SessionStore.shared
         let sessionId = "codex-compact-\(UUID().uuidString)"

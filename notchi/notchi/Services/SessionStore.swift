@@ -648,6 +648,7 @@ nonisolated enum CodexCompactionSignalResolver {
         for row in output.split(separator: "\n", omittingEmptySubsequences: true) {
             let parts = row.split(separator: Character(CodexFileSystem.sqliteSeparator), maxSplits: 3, omittingEmptySubsequences: false)
             guard parts.count == 4,
+                  UUID(uuidString: String(parts[0])) != nil,
                   let seconds = TimeInterval(String(parts[1])),
                   let nanoseconds = TimeInterval(String(parts[2])),
                   let signal = parseLogBody(
@@ -700,12 +701,8 @@ nonisolated enum CodexCompactionSignalResolver {
         }
 
         let matched = text[range]
-        guard let start = matched.firstIndex(of: "("),
-              let end = matched.firstIndex(of: ")") else {
-            return nil
-        }
-
-        return Int(matched[matched.index(after: start)..<end])
+        let prefix = "\(name)=Some("
+        return Int(matched.dropFirst(prefix.count).dropLast())
     }
 
     private static func boolValue(named name: String, in text: String) -> Bool? {
