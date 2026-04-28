@@ -42,6 +42,7 @@ final class SessionData: Identifiable {
     private(set) var codexTitle: String?
     private(set) var codexTranscriptPath: String?
     private(set) var codexArchived: Bool = false
+    private(set) var codexCompactionSignal: CodexCompactionSignal?
 
     private var durationTimer: Task<Void, Never>?
     private var sleepTimer: Task<Void, Never>?
@@ -178,8 +179,28 @@ final class SessionData: Identifiable {
     }
 
     func updateTask(_ newTask: NotchiTask) {
+        if newTask == .working, task == .compacting, hasActiveCodexCompactionSignal {
+            lastActivity = Date()
+            return
+        }
+
         task = newTask
         lastActivity = Date()
+    }
+
+    private var hasActiveCodexCompactionSignal: Bool {
+        guard provider == .codex,
+              isProcessing,
+              let signal = codexCompactionSignal,
+              signal.tokenLimitReached else {
+            return false
+        }
+
+        if let promptSubmitTime, signal.observedAt < promptSubmitTime {
+            return false
+        }
+
+        return true
     }
 
     func updateProcessingState(isProcessing: Bool) {
@@ -197,6 +218,9 @@ final class SessionData: Identifiable {
         }
         lastUserPromptHasAttachments = hasAttachments
         promptSubmitTime = now
+        if provider == .codex {
+            codexCompactionSignal = nil
+        }
         lastActivity = now
         logger.debug("Setting promptSubmitTime to: \(now)")
     }
@@ -240,6 +264,31 @@ final class SessionData: Identifiable {
         guard let metadata else { return }
         updateCodexTitle(metadata.title)
         codexArchived = metadata.archived
+    }
+
+    func updateCodexCompactionSignal(_ signal: CodexCompactionSignal?) {
+        guard provider == .codex else { return }
+
+        guard let signal else {
+            codexCompactionSignal = nil
+            return
+        }
+
+        // WHY: the latest sqlite row can belong to the previous turn until Codex
+        // writes this turn's usage row, so don't let it re-enter compacting.
+        if let promptSubmitTime, signal.observedAt < promptSubmitTime {
+            return
+        }
+
+        codexCompactionSignal = signal
+
+        guard isProcessing else { return }
+
+        if signal.tokenLimitReached {
+            updateTask(.compacting)
+        } else if task == .compacting {
+            updateTask(.working)
+        }
     }
 
     func setPendingQuestions(_ questions: [PendingQuestion]) {
