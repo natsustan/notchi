@@ -379,6 +379,8 @@ private struct EmotionAnalysisSettingsView: View {
     @State private var isProviderPickerExpanded = false
     @State private var isModelPickerExpanded = false
     @State private var testState: TestState = .idle
+    @State private var setupLinkShakePhase: CGFloat = 0
+    @FocusState private var isAPIKeyFocused: Bool
 
     private var hasApiKey: Bool {
         !apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -392,11 +394,8 @@ private struct EmotionAnalysisSettingsView: View {
                 modelSection
                 apiKeySection
                 testSection
+                setupSection
             }
-
-            Spacer(minLength: SettingsLayout.sectionSpacing)
-
-            setupSection
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .onDisappear {
@@ -407,18 +406,27 @@ private struct EmotionAnalysisSettingsView: View {
         .onChange(of: apiKeyInput) { _, _ in
             resetTestState()
         }
+        .onChange(of: isAPIKeyFocused) { _, focused in
+            guard focused else { return }
+            withAnimation(.linear(duration: 0.28)) {
+                setupLinkShakePhase += 1
+            }
+        }
     }
 
     private var descriptionSection: some View {
         Text("Prompts are sent to the selected provider for emotion classification.")
-            .font(.system(size: 10))
-            .foregroundColor(TerminalColors.dimmedText)
+            .font(.system(size: 11))
+            .foregroundColor(TerminalColors.secondaryText)
             .fixedSize(horizontal: false, vertical: true)
     }
 
     private var providerSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button(action: { isProviderPickerExpanded.toggle() }) {
+            Button(action: {
+                blurAPIKeyField()
+                isProviderPickerExpanded.toggle()
+            }) {
                 SettingsRowView(icon: "switch.2", title: "Provider") {
                     HStack(spacing: 4) {
                         Text(provider.displayName)
@@ -498,9 +506,7 @@ private struct EmotionAnalysisSettingsView: View {
 
     @ViewBuilder
     private var apiKeyStatusView: some View {
-        if hasApiKey {
-            statusBadge("Saved", color: TerminalColors.green)
-        } else if provider == .claude, hasClaudeCodeFallback {
+        if !hasApiKey, provider == .claude, hasClaudeCodeFallback {
             statusBadge("Claude Code", color: TerminalColors.green)
         }
     }
@@ -516,6 +522,7 @@ private struct EmotionAnalysisSettingsView: View {
                     .padding(.vertical, SettingsLayout.fieldVerticalPadding)
                     .background(Color.white.opacity(0.06))
                     .cornerRadius(6)
+                    .focused($isAPIKeyFocused)
                     .onSubmit { saveApiKey(for: provider) }
 
                 if apiKeyInput.isEmpty {
@@ -528,7 +535,10 @@ private struct EmotionAnalysisSettingsView: View {
             }
             .frame(minWidth: 220, maxWidth: 300)
 
-            Button(action: { saveApiKey(for: provider) }) {
+            Button(action: {
+                blurAPIKeyField()
+                saveApiKey(for: provider)
+            }) {
                 Image(systemName: hasApiKey ? "checkmark.circle.fill" : "arrow.right.circle")
                     .font(.system(size: 14))
                     .foregroundColor(hasApiKey ? TerminalColors.green : TerminalColors.dimmedText)
@@ -544,41 +554,91 @@ private struct EmotionAnalysisSettingsView: View {
                     .font(.system(size: 10))
                     .foregroundColor(TerminalColors.dimmedText)
             }
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isAPIKeyFocused ? TerminalColors.hoverBackground : Color.clear)
+                    .padding(.horizontal, -4)
+                    .padding(.vertical, -2)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isAPIKeyFocused ? Color.white.opacity(0.08) : Color.clear, lineWidth: 1)
+                    .padding(.horizontal, -4)
+                    .padding(.vertical, -2)
+            )
         }
         .buttonStyle(.plain)
+        .modifier(HorizontalShake(animatableData: setupLinkShakePhase))
+        .animation(.easeInOut(duration: 0.15), value: isAPIKeyFocused)
     }
 
     private var testSection: some View {
-        Button(action: testEmotionAnalysis) {
-            SettingsRowView(icon: "bolt.horizontal", title: "Test") {
-                testStatusView
+        VStack(alignment: .leading, spacing: 4) {
+            Button(action: testEmotionAnalysis) {
+                SettingsRowView(icon: "bolt.horizontal", title: "Test") {
+                    testStatusView
+                }
             }
+            .buttonStyle(.plain)
+            .disabled(isTesting || !canTest)
+
+            testDetailView
         }
-        .buttonStyle(.plain)
-        .disabled(isTesting)
     }
 
     @ViewBuilder
     private var testStatusView: some View {
         switch testState {
         case .idle:
-            Image(systemName: "play.circle")
-                .font(.system(size: 13))
-                .foregroundColor(canTest ? TerminalColors.dimmedText : TerminalColors.red)
+            if canTest {
+                Image(systemName: "play.circle")
+                    .font(.system(size: 13))
+                    .foregroundColor(TerminalColors.dimmedText)
+            } else {
+                statusBadge("Missing key", color: TerminalColors.red)
+            }
         case .testing:
             ProgressView()
                 .controlSize(.mini)
                 .frame(width: 16, height: 16)
-        case .success(let result):
-            statusBadge(testResultText(result), color: TerminalColors.green)
+        case .success:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 13))
+                .foregroundColor(TerminalColors.green)
         case .failure(let message):
             statusBadge(message, color: TerminalColors.red)
         }
     }
 
+    @ViewBuilder
+    private var testDetailView: some View {
+        switch testState {
+        case .idle:
+            EmptyView()
+        case .testing:
+            testDetailText("Testing \(provider.displayName) with \(model.displayName)...")
+        case .success(let result):
+            testDetailText("Result: \(testResultText(result))")
+        case .failure:
+            testDetailText(canTest ? "Could not verify this configuration." : "Add an API key to test this configuration.")
+        }
+    }
+
+    private func testDetailText(_ text: String) -> some View {
+        Text(text)
+            .font(.system(size: 10))
+            .foregroundColor(TerminalColors.dimmedText)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.leading, 28)
+    }
+
     private var modelSection: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button(action: { isModelPickerExpanded.toggle() }) {
+            Button(action: {
+                blurAPIKeyField()
+                isModelPickerExpanded.toggle()
+            }) {
                 SettingsRowView(icon: "cpu", title: "Model") {
                     HStack(spacing: 4) {
                         Text(model.displayName)
@@ -670,6 +730,7 @@ private struct EmotionAnalysisSettingsView: View {
     }
 
     private func selectProvider(_ newProvider: EmotionAnalysisProvider) {
+        blurAPIKeyField()
         guard newProvider != provider else { return }
         saveApiKey(for: provider)
         provider = newProvider
@@ -680,6 +741,8 @@ private struct EmotionAnalysisSettingsView: View {
     }
 
     private func selectModel(_ newModel: EmotionAnalysisModel) {
+        blurAPIKeyField()
+        guard newModel != model else { return }
         model = newModel
         AppSettings.setEmotionAnalysisModel(newModel, for: provider)
         resetTestState()
@@ -691,10 +754,12 @@ private struct EmotionAnalysisSettingsView: View {
     }
 
     private func openAPIKeyPage() {
+        blurAPIKeyField()
         NSWorkspace.shared.open(provider.apiKeyURL)
     }
 
     private func testEmotionAnalysis() {
+        blurAPIKeyField()
         guard !isTesting else { return }
         testState = .testing
 
@@ -730,8 +795,12 @@ private struct EmotionAnalysisSettingsView: View {
         self.provider == provider && self.model == model && apiKeyInput == apiKey
     }
 
+    private func blurAPIKeyField() {
+        isAPIKeyFocused = false
+    }
+
     private func testResultText(_ result: EmotionAnalysisTestResult) -> String {
-        "\(result.emotion.capitalized) \(String(format: "%.2f", result.intensity)) / \(result.latencyMilliseconds)ms"
+        "\(result.emotion.capitalized) \(String(format: "%.2f", result.intensity)) - \(result.latencyMilliseconds)ms"
     }
 
     private func testErrorText(_ error: Error) -> String {
@@ -764,6 +833,21 @@ private struct EmotionAnalysisSettingsView: View {
             .background(color.opacity(0.15))
             .cornerRadius(4)
             .frame(maxWidth: 160, alignment: .trailing)
+    }
+}
+
+private struct HorizontalShake: GeometryEffect {
+    var travelDistance: CGFloat = 3
+    var cyclesPerUnit: CGFloat = 1
+    var animatableData: CGFloat
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(
+            CGAffineTransform(
+                translationX: travelDistance * sin(animatableData * .pi * 2 * cyclesPerUnit),
+                y: 0
+            )
+        )
     }
 }
 
