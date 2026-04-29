@@ -14,6 +14,7 @@ enum KeychainManager {
     private static let claudeCodeService = "Claude Code-credentials"
     private static let notchiService = "com.ruban.notchi"
     private static let anthropicApiKeyAccount = "anthropicApiKey"
+    private static let openAIApiKeyAccount = "openAIApiKey"
     private static let cachedOAuthTokenAccount = "cachedOAuthToken"
     private static let recentCredentialCacheTTL: TimeInterval = 5
     private static let securityCLIBackoffInterval: TimeInterval = 60
@@ -62,6 +63,22 @@ enum KeychainManager {
             saveString(key, service: notchiService, account: anthropicApiKeyAccount)
         } else {
             deleteItem(service: notchiService, account: anthropicApiKeyAccount)
+        }
+    }
+
+    static func getOpenAIApiKey(allowInteraction: Bool = false) -> String? {
+        readString(
+            service: notchiService,
+            account: openAIApiKeyAccount,
+            allowInteraction: allowInteraction
+        )
+    }
+
+    static func setOpenAIApiKey(_ key: String?) {
+        if let key, !key.isEmpty {
+            saveString(key, service: notchiService, account: openAIApiKeyAccount)
+        } else {
+            deleteItem(service: notchiService, account: openAIApiKeyAccount)
         }
     }
 

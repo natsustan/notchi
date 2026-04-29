@@ -47,6 +47,7 @@ struct NotchContentView: View {
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @ObservedObject private var updateManager = UpdateManager.shared
     @State private var showingPanelSettings = false
+    @State private var showingPanelSettingsDetail = false
     @State private var showingSessionActivity = false
     @State private var isMuted = AppSettings.isMuted
     @State private var isActivityCollapsed = false
@@ -289,6 +290,7 @@ struct NotchContentView: View {
             startSpriteHandoff(for: expanded)
             if !expanded {
                 showingPanelSettings = false
+                showingPanelSettingsDetail = false
                 showingSessionActivity = false
                 hoveredSessionId = nil
             }
@@ -313,6 +315,7 @@ struct NotchContentView: View {
                         usageService: usageService,
                         codexUsageService: CodexUsageService.shared,
                         showingSettings: $showingPanelSettings,
+                        showingSettingsDetail: $showingPanelSettingsDetail,
                         showingSessionActivity: $showingSessionActivity,
                         isActivityCollapsed: $isActivityCollapsed,
                         hoveredSessionId: $hoveredSessionId
@@ -361,6 +364,7 @@ struct NotchContentView: View {
                 showsIndicator: updateManager.hasPendingUpdate,
                 action: {
                     haptics.playNavigationTap()
+                    showingPanelSettingsDetail = false
                     showingPanelSettings = true
                 }
             )
@@ -384,7 +388,11 @@ struct NotchContentView: View {
 
     private func goBack() {
         if showingPanelSettings {
-            showingPanelSettings = false
+            if showingPanelSettingsDetail {
+                showingPanelSettingsDetail = false
+            } else {
+                showingPanelSettings = false
+            }
         } else if showingSessionActivity {
             showingSessionActivity = false
             sessionStore.clearSelectedSession()

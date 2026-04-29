@@ -10,7 +10,29 @@ struct ClaudeSettingsConfig {
 
     nonisolated static let defaultBaseURL = "https://api.anthropic.com"
     nonisolated static let defaultAPIURL = URL(string: "\(defaultBaseURL)/v1/messages")!
-    nonisolated static let defaultModel = "claude-haiku-4-5-20251001"
+    nonisolated static let defaultModel = EmotionAnalysisModel.claudeHaiku45.rawValue
+
+    nonisolated static func load(from settingsURL: URL) -> ClaudeSettingsConfig? {
+        let logger = Logger(subsystem: "com.ruban.notchi", category: "EmotionAnalyzer")
+        guard let data = try? Data(contentsOf: settingsURL) else {
+            return nil
+        }
+
+        do {
+            return try parse(from: data)
+        } catch {
+            logger.error("Failed to parse Claude settings.json: \(error.localizedDescription)")
+            return nil
+        }
+    }
+
+    nonisolated static func loadFromDefaultLocation() -> ClaudeSettingsConfig? {
+        load(from: ClaudeConfigDirectoryResolver.resolve().settingsURL)
+    }
+
+    nonisolated static func existsAtDefaultLocation() -> Bool {
+        loadFromDefaultLocation() != nil
+    }
 
     nonisolated static func parse(from data: Data) throws -> ClaudeSettingsConfig? {
         let logger = Logger(subsystem: "com.ruban.notchi", category: "EmotionAnalyzer")
@@ -60,6 +82,10 @@ struct ClaudeSettingsConfig {
     }
 }
 
+enum OpenAISettingsConfig {
+    nonisolated static let defaultAPIURL = URL(string: "https://api.openai.com/v1/chat/completions")!
+}
+
 private struct HaikuResponse: Decodable {
     let content: [ContentBlock]
 
@@ -68,16 +94,215 @@ private struct HaikuResponse: Decodable {
     }
 }
 
+private struct OpenAIChatCompletionResponse: Decodable {
+    let choices: [Choice]
+
+    struct Choice: Decodable {
+        let message: Message
+    }
+
+    struct Message: Decodable {
+        let content: String?
+    }
+}
+
 private struct EmotionResponse: Decodable {
     let emotion: String
     let intensity: Double
 }
 
+struct EmotionAnalysisTestResult {
+    let emotion: String
+    let intensity: Double
+    let latencyMilliseconds: Int
+}
+
+enum EmotionAnalysisRequestError: LocalizedError {
+    case missingAPIKey(EmotionAnalysisProvider)
+    case httpStatus(provider: String, statusCode: Int)
+    case invalidResponse
+
+    var errorDescription: String? {
+        switch self {
+        case .missingAPIKey(let provider):
+            "Missing \(provider.displayName) API key"
+        case .httpStatus(let provider, let statusCode):
+            "\(provider) API returned HTTP \(statusCode)"
+        case .invalidResponse:
+            "Invalid emotion analysis response"
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .missingAPIKey:
+            "Missing"
+        case .httpStatus(_, let statusCode):
+            "HTTP \(statusCode)"
+        case .invalidResponse:
+            "Invalid"
+        }
+    }
+}
+
+private struct EmotionAnalysisResponseParser {
+    private static let validEmotions: Set<String> = ["happy", "sad", "neutral"]
+
+    static func parse(_ text: String) throws -> (emotion: String, intensity: Double) {
+        let jsonString = extractJSON(from: text)
+        let emotionResponse = try JSONDecoder().decode(EmotionResponse.self, from: Data(jsonString.utf8))
+
+        let emotion = validEmotions.contains(emotionResponse.emotion) ? emotionResponse.emotion : "neutral"
+        let intensity = min(max(emotionResponse.intensity, 0.0), 1.0)
+
+        return (emotion, intensity)
+    }
+
+    static func extractJSON(from text: String) -> String {
+        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        // Strip markdown code blocks: ```json ... ``` or ``` ... ```
+        if cleaned.hasPrefix("```") {
+            if let firstNewline = cleaned.firstIndex(of: "\n") {
+                cleaned = String(cleaned[cleaned.index(after: firstNewline)...])
+            }
+            if cleaned.hasSuffix("```") {
+                cleaned = String(cleaned.dropLast(3))
+            }
+            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        if let start = cleaned.firstIndex(of: "{"),
+           let end = cleaned.lastIndex(of: "}") {
+            cleaned = String(cleaned[start...end])
+        }
+
+        return cleaned
+    }
+}
+
+private protocol EmotionAnalysisProviding {
+    var providerName: String { get }
+    func analyze(prompt: String, systemPrompt: String) async throws -> (emotion: String, intensity: Double)
+}
+
+private struct ClaudeEmotionAnalysisProvider: EmotionAnalysisProviding {
+    let apiURL: URL
+    let apiKey: String
+    let model: String
+
+    var providerName: String { "Claude" }
+
+    func analyze(prompt: String, systemPrompt: String) async throws -> (emotion: String, intensity: Double) {
+        var request = URLRequest(url: apiURL)
+        request.httpMethod = "POST"
+        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
+        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+
+        let body: [String: Any] = [
+            "model": model,
+            "max_tokens": 50,
+            "system": systemPrompt,
+            "messages": [
+                ["role": "user", "content": prompt]
+            ]
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw EmotionAnalysisRequestError.invalidResponse
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            logger.warning("Claude API returned HTTP \(httpResponse.statusCode)")
+            throw EmotionAnalysisRequestError.httpStatus(provider: providerName, statusCode: httpResponse.statusCode)
+        }
+
+        let haikuResponse = try JSONDecoder().decode(HaikuResponse.self, from: data)
+
+        guard let text = haikuResponse.content.first?.text else {
+            throw EmotionAnalysisRequestError.invalidResponse
+        }
+
+        logger.debug("Claude raw response: \(text, privacy: .private)")
+        return try EmotionAnalysisResponseParser.parse(text)
+    }
+}
+
+private struct OpenAIEmotionAnalysisProvider: EmotionAnalysisProviding {
+    let apiURL: URL
+    let apiKey: String
+    let model: String
+
+    var providerName: String { "OpenAI" }
+
+    func analyze(prompt: String, systemPrompt: String) async throws -> (emotion: String, intensity: Double) {
+        var request = URLRequest(url: apiURL)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue("application/json", forHTTPHeaderField: "content-type")
+
+        let body: [String: Any] = [
+            "model": model,
+            "max_completion_tokens": 80,
+            "response_format": [
+                "type": "json_schema",
+                "json_schema": [
+                    "name": "emotion_analysis",
+                    "strict": true,
+                    "schema": [
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": [
+                            "emotion": [
+                                "type": "string",
+                                "enum": ["happy", "sad", "neutral"]
+                            ],
+                            "intensity": [
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1
+                            ]
+                        ],
+                        "required": ["emotion", "intensity"]
+                    ]
+                ]
+            ],
+            "messages": [
+                ["role": "system", "content": systemPrompt],
+                ["role": "user", "content": prompt]
+            ]
+        ]
+        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
+        guard let httpResponse = response as? HTTPURLResponse else {
+            throw EmotionAnalysisRequestError.invalidResponse
+        }
+
+        guard httpResponse.statusCode == 200 else {
+            logger.warning("OpenAI API returned HTTP \(httpResponse.statusCode)")
+            throw EmotionAnalysisRequestError.httpStatus(provider: providerName, statusCode: httpResponse.statusCode)
+        }
+
+        let chatResponse = try JSONDecoder().decode(OpenAIChatCompletionResponse.self, from: data)
+
+        guard let text = chatResponse.choices.first?.message.content else {
+            throw EmotionAnalysisRequestError.invalidResponse
+        }
+
+        logger.debug("OpenAI raw response: \(text, privacy: .private)")
+        return try EmotionAnalysisResponseParser.parse(text)
+    }
+}
+
 @MainActor
 final class EmotionAnalyzer {
     static let shared = EmotionAnalyzer()
-
-    private static let validEmotions: Set<String> = ["happy", "sad", "neutral"]
 
     private static let systemPrompt = """
         Classify the emotional tone of the user's message into exactly one emotion and an intensity score.
@@ -89,140 +314,129 @@ final class EmotionAnalyzer {
         Intensity: 0.0 (barely noticeable) to 1.0 (very strong). ALL CAPS text indicates stronger emotion — increase intensity by 0.2-0.3 compared to the same message in lowercase.
         Reply with ONLY valid JSON: {"emotion": "...", "intensity": ...}
         """
+    private static let testPrompt = "Thanks, this looks great!"
 
     private init() {}
 
     func analyze(_ prompt: String) async -> (emotion: String, intensity: Double) {
         let start = ContinuousClock.now
 
-        guard let config = resolveAPIConfig() else {
+        guard let provider = resolveProvider() else {
             logger.info("No emotion analysis configuration available, using neutral fallback")
             return ("neutral", 0.0)
         }
 
         do {
-            let result = try await callHaiku(
-                prompt: prompt,
-                apiURL: config.apiURL,
-                apiKey: config.apiKey,
-                model: config.model
-            )
+            let result = try await provider.analyze(prompt: prompt, systemPrompt: Self.systemPrompt)
             let elapsed = ContinuousClock.now - start
-            logger.info("Analysis took \(elapsed, privacy: .public)")
+            logger.info("\(provider.providerName, privacy: .public) analysis took \(elapsed, privacy: .public)")
             return result
         } catch {
             let elapsed = ContinuousClock.now - start
-            logger.error("Haiku API failed (\(elapsed, privacy: .public)): \(error.localizedDescription)")
+            logger.error("\(provider.providerName, privacy: .public) API failed (\(elapsed, privacy: .public)): \(error.localizedDescription)")
             return ("neutral", 0.0)
         }
     }
 
-    private static func extractJSON(from text: String) -> String {
-        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-
-        // Strip markdown code blocks: ```json ... ``` or ``` ... ```
-        if cleaned.hasPrefix("```") {
-            // Remove opening ``` (with optional language tag)
-            if let firstNewline = cleaned.firstIndex(of: "\n") {
-                cleaned = String(cleaned[cleaned.index(after: firstNewline)...])
-            }
-            // Remove closing ```
-            if cleaned.hasSuffix("```") {
-                cleaned = String(cleaned.dropLast(3))
-            }
-            cleaned = cleaned.trimmingCharacters(in: .whitespacesAndNewlines)
+    private func resolveProvider() -> EmotionAnalysisProviding? {
+        switch AppSettings.emotionAnalysisProvider {
+        case .claude:
+            return resolveClaudeProvider()
+        case .openAI:
+            return resolveOpenAIProvider()
         }
-
-        // Find first { to last } in case of surrounding text
-        if let start = cleaned.firstIndex(of: "{"),
-           let end = cleaned.lastIndex(of: "}") {
-            cleaned = String(cleaned[start...end])
-        }
-
-        return cleaned
     }
 
-    private func resolveAPIConfig() -> (apiURL: URL, apiKey: String, model: String)? {
-        guard let apiKey = KeychainManager.getAnthropicApiKey(allowInteraction: false)?
+    private func resolveClaudeProvider() -> ClaudeEmotionAnalysisProvider? {
+        if let apiKey = KeychainManager.getAnthropicApiKey(allowInteraction: false)?
             .trimmingCharacters(in: .whitespacesAndNewlines),
-              !apiKey.isEmpty else {
-            return loadClaudeSettingsConfig()
+           !apiKey.isEmpty {
+            return ClaudeEmotionAnalysisProvider(
+                apiURL: ClaudeSettingsConfig.defaultAPIURL,
+                apiKey: apiKey,
+                model: AppSettings.selectedEmotionAnalysisModel(for: .claude).rawValue
+            )
         }
 
-        return (
-            apiURL: ClaudeSettingsConfig.defaultAPIURL,
-            apiKey: apiKey,
-            model: ClaudeSettingsConfig.defaultModel
+        guard let config = ClaudeSettingsConfig.loadFromDefaultLocation() else {
+            return nil
+        }
+
+        return ClaudeEmotionAnalysisProvider(
+            apiURL: config.apiURL,
+            apiKey: config.apiKey,
+            model: AppSettings.storedEmotionAnalysisModel(for: .claude)?.rawValue ?? config.model
         )
     }
 
-    private func loadClaudeSettingsConfig() -> (apiURL: URL, apiKey: String, model: String)? {
-        Self.loadClaudeSettingsConfig(from: ClaudeConfigDirectoryResolver.resolve().settingsURL)
-    }
-
-    nonisolated static func loadClaudeSettingsConfig(from settingsURL: URL) -> (apiURL: URL, apiKey: String, model: String)? {
-        let logger = Logger(subsystem: "com.ruban.notchi", category: "EmotionAnalyzer")
-        guard let data = try? Data(contentsOf: settingsURL) else {
+    private func resolveOpenAIProvider() -> OpenAIEmotionAnalysisProvider? {
+        guard let apiKey = KeychainManager.getOpenAIApiKey(allowInteraction: false)?
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !apiKey.isEmpty else {
             return nil
         }
 
-        do {
-            guard let config = try ClaudeSettingsConfig.parse(from: data) else {
-                return nil
+        return OpenAIEmotionAnalysisProvider(
+            apiURL: OpenAISettingsConfig.defaultAPIURL,
+            apiKey: apiKey,
+            model: AppSettings.selectedEmotionAnalysisModel(for: .openAI).rawValue
+        )
+    }
+
+    func testConfiguration(
+        provider: EmotionAnalysisProvider,
+        model: EmotionAnalysisModel,
+        apiKey: String?
+    ) async throws -> EmotionAnalysisTestResult {
+        let analysisProvider = try resolveProvider(provider: provider, model: model, apiKey: apiKey)
+        let start = ContinuousClock.now
+        let result = try await analysisProvider.analyze(prompt: Self.testPrompt, systemPrompt: Self.systemPrompt)
+        let elapsed = (ContinuousClock.now - start).components
+        let latency = Int(elapsed.seconds * 1_000 + elapsed.attoseconds / 1_000_000_000_000_000)
+
+        return EmotionAnalysisTestResult(
+            emotion: result.emotion,
+            intensity: result.intensity,
+            latencyMilliseconds: latency
+        )
+    }
+
+    private func resolveProvider(
+        provider: EmotionAnalysisProvider,
+        model: EmotionAnalysisModel,
+        apiKey: String?
+    ) throws -> EmotionAnalysisProviding {
+        let trimmedKey = apiKey?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+        switch provider {
+        case .claude:
+            if !trimmedKey.isEmpty {
+                return ClaudeEmotionAnalysisProvider(
+                    apiURL: ClaudeSettingsConfig.defaultAPIURL,
+                    apiKey: trimmedKey,
+                    model: model.rawValue
+                )
             }
-            return (
-                apiURL: config.apiURL,
-                apiKey: config.apiKey,
-                model: config.model
+
+            if let config = ClaudeSettingsConfig.loadFromDefaultLocation() {
+                return ClaudeEmotionAnalysisProvider(
+                    apiURL: config.apiURL,
+                    apiKey: config.apiKey,
+                    model: model.rawValue
+                )
+            }
+
+            throw EmotionAnalysisRequestError.missingAPIKey(provider)
+        case .openAI:
+            guard !trimmedKey.isEmpty else {
+                throw EmotionAnalysisRequestError.missingAPIKey(provider)
+            }
+
+            return OpenAIEmotionAnalysisProvider(
+                apiURL: OpenAISettingsConfig.defaultAPIURL,
+                apiKey: trimmedKey,
+                model: model.rawValue
             )
-        } catch {
-            logger.error("Failed to parse Claude settings.json: \(error.localizedDescription)")
-            return nil
         }
-    }
-
-    private func callHaiku(prompt: String, apiURL: URL, apiKey: String, model: String) async throws -> (emotion: String, intensity: Double) {
-        var request = URLRequest(url: apiURL)
-        request.httpMethod = "POST"
-        request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-        request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-        request.setValue("application/json", forHTTPHeaderField: "content-type")
-
-        let body: [String: Any] = [
-            "model": model,
-            "max_tokens": 50,
-            "system": Self.systemPrompt,
-            "messages": [
-                ["role": "user", "content": prompt]
-            ]
-        ]
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw URLError(.badServerResponse)
-        }
-
-        guard httpResponse.statusCode == 200 else {
-            logger.warning("Haiku API returned HTTP \(httpResponse.statusCode)")
-            throw URLError(.badServerResponse)
-        }
-
-        let haikuResponse = try JSONDecoder().decode(HaikuResponse.self, from: data)
-
-        guard let text = haikuResponse.content.first?.text else {
-            throw URLError(.cannotParseResponse)
-        }
-
-        logger.debug("Haiku raw response: \(text, privacy: .public)")
-
-        let jsonString = Self.extractJSON(from: text)
-        let emotionResponse = try JSONDecoder().decode(EmotionResponse.self, from: Data(jsonString.utf8))
-
-        let emotion = Self.validEmotions.contains(emotionResponse.emotion) ? emotionResponse.emotion : "neutral"
-        let intensity = min(max(emotionResponse.intensity, 0.0), 1.0)
-
-        return (emotion, intensity)
     }
 }
