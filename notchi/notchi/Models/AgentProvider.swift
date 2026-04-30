@@ -33,7 +33,7 @@ nonisolated enum AgentProvider: String, Codable, CaseIterable, Hashable, Sendabl
             ProviderCapabilities(
                 supportsPermissionPrompts: true,
                 supportsUsageResumeTriggers: false,
-                supportsPromptEmotionAnalysis: false,
+                supportsPromptEmotionAnalysis: true,
                 supportsDerivedTranscriptFallback: false
             )
         }

@@ -66,14 +66,29 @@ final class EmotionAnalyzerTests: XCTestCase {
         )
         XCTAssertEqual(
             EmotionAnalysisModel.models(for: .openAI),
-            [.openAIGPT54Nano, .openAIGPT54Mini]
+            [.openAIGPT54Mini, .openAIGPT54Nano, .openAIGPT41Mini]
         )
     }
 
     func testDefaultEmotionModelsStayFastAndCheap() {
         XCTAssertEqual(ClaudeSettingsConfig.defaultModel, EmotionAnalysisModel.claudeHaiku45.rawValue)
         XCTAssertEqual(EmotionAnalysisModel.defaultModel(for: .claude), .claudeHaiku45)
-        XCTAssertEqual(EmotionAnalysisModel.defaultModel(for: .openAI), .openAIGPT54Nano)
+        XCTAssertEqual(EmotionAnalysisModel.defaultModel(for: .openAI), .openAIGPT54Mini)
+    }
+
+    @MainActor
+    func testAnalyzeReturnsNilWhenNoProviderResolved() async {
+        let result = await EmotionAnalyzer.shared.analyze(prompt: "hello", using: nil)
+        XCTAssertNil(result)
+    }
+
+    @MainActor
+    func testAnalyzeReturnsNilWhenProviderThrows() async {
+        let result = await EmotionAnalyzer.shared.analyze(
+            prompt: "hello",
+            using: ThrowingEmotionProvider()
+        )
+        XCTAssertNil(result)
     }
 
     func testLoadClaudeSettingsConfigReadsCustomResolvedSettingsFile() throws {
@@ -100,5 +115,13 @@ final class EmotionAnalyzerTests: XCTestCase {
         try JSONSerialization.data(withJSONObject: [
             "env": env,
         ])
+    }
+}
+
+private struct ThrowingEmotionProvider: EmotionAnalysisProviding {
+    var providerName: String { "Throwing" }
+
+    func analyze(prompt: String, systemPrompt: String) async throws -> (emotion: String, intensity: Double) {
+        throw URLError(.notConnectedToInternet)
     }
 }

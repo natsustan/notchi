@@ -181,7 +181,7 @@ private struct EmotionAnalysisResponseParser {
     }
 }
 
-private protocol EmotionAnalysisProviding {
+protocol EmotionAnalysisProviding {
     var providerName: String { get }
     func analyze(prompt: String, systemPrompt: String) async throws -> (emotion: String, intensity: Double)
 }
@@ -307,10 +307,11 @@ final class EmotionAnalyzer {
     private static let systemPrompt = """
         Classify the emotional tone of the user's message into exactly one emotion and an intensity score.
         Emotions: happy, sad, neutral.
-        Happy: explicit praise ("great job", "thank you!"), gratitude, celebration, positive profanity ("LETS FUCKING GO").
+        Happy: explicit praise ("great job", "you are so good"), gratitude, celebration, affection toward the assistant ("I love you", "love u", "you're the best"), positive profanity ("LETS FUCKING GO").
         Sad: frustration, anger, insults, complaints, feeling stuck, disappointment, negative profanity.
         Neutral: instructions, requests, task descriptions, questions, enthusiasm about work, factual statements. Exclamation marks or urgency about a task do NOT make it happy — only genuine positive sentiment toward the AI or outcome does.
         Default to neutral when unsure. Most coding instructions are neutral regardless of tone.
+        Direct affection or praise aimed at the assistant is happy, not neutral, even when casual or abbreviated.
         Intensity: 0.0 (barely noticeable) to 1.0 (very strong). ALL CAPS text indicates stronger emotion — increase intensity by 0.2-0.3 compared to the same message in lowercase.
         Reply with ONLY valid JSON: {"emotion": "...", "intensity": ...}
         """
@@ -318,12 +319,16 @@ final class EmotionAnalyzer {
 
     private init() {}
 
-    func analyze(_ prompt: String) async -> (emotion: String, intensity: Double) {
+    func analyze(_ prompt: String) async -> (emotion: String, intensity: Double)? {
+        await analyze(prompt: prompt, using: resolveProvider())
+    }
+
+    func analyze(prompt: String, using provider: EmotionAnalysisProviding?) async -> (emotion: String, intensity: Double)? {
         let start = ContinuousClock.now
 
-        guard let provider = resolveProvider() else {
-            logger.info("No emotion analysis configuration available, using neutral fallback")
-            return ("neutral", 0.0)
+        guard let provider else {
+            logger.info("No emotion analysis configuration available; skipping prompt emotion update")
+            return nil
         }
 
         do {
@@ -334,7 +339,7 @@ final class EmotionAnalyzer {
         } catch {
             let elapsed = ContinuousClock.now - start
             logger.error("\(provider.providerName, privacy: .public) API failed (\(elapsed, privacy: .public)): \(error.localizedDescription)")
-            return ("neutral", 0.0)
+            return nil
         }
     }
 

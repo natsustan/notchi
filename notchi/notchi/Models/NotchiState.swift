@@ -12,6 +12,10 @@ enum NotchiTask: String, CaseIterable {
         }
     }
 
+    var loopDuration: Double {
+        Double(frameCount) / animationFPS
+    }
+
     var spritePrefix: String { rawValue }
 
     var bobDuration: Double {
@@ -94,6 +98,8 @@ enum NotchiSpriteFamily: String {
 }
 
 struct NotchiState: Equatable {
+    private static let happyIdleLoopDuration = 2.4
+
     var task: NotchiTask
     var emotion: NotchiEmotion = .neutral
     var spriteFamily: NotchiSpriteFamily = .claude
@@ -118,12 +124,15 @@ struct NotchiState: Equatable {
     }
 
     var animationFPS: Double {
-        switch emotion {
-        case .elated:
-            return max(task.animationFPS, 6.0)
-        default:
-            return task.animationFPS
+        Double(frameCount) / loopDuration
+    }
+
+    private var loopDuration: Double {
+        if task == .idle, emotion == .happy {
+            return Self.happyIdleLoopDuration
         }
+
+        return task.loopDuration
     }
     var bobDuration: Double { task.bobDuration }
     var bobAmplitude: CGFloat {

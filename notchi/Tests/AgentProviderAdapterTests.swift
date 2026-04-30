@@ -18,6 +18,10 @@ final class AgentProviderAdapterTests: XCTestCase {
         XCTAssertTrue(AgentProvider.codex.capabilities.supportsPermissionPrompts)
     }
 
+    func testCodexProviderCapabilitiesIncludePromptEmotionAnalysis() {
+        XCTAssertTrue(AgentProvider.codex.capabilities.supportsPromptEmotionAnalysis)
+    }
+
     func testClaudeAdapterNormalizesEnvelopeIntoHookEvent() throws {
         let data = try JSONSerialization.data(withJSONObject: [
             "session_id": "claude-session",
