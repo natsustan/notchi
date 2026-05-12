@@ -95,31 +95,57 @@ enum NotchiEmotion: String, CaseIterable {
 
 enum NotchiSpriteFamily: String {
     case claude
+    case codex
+}
+
+extension AgentProvider {
+    var spriteFamily: NotchiSpriteFamily {
+        switch self {
+        case .claude:
+            .claude
+        case .codex:
+            .codex
+        }
+    }
 }
 
 struct NotchiState: Equatable {
-    private static let happyIdleLoopDuration = 2.4
+    private static let expressiveSpriteTargetFPS = 7.0
 
     var task: NotchiTask
     var emotion: NotchiEmotion = .neutral
     var spriteFamily: NotchiSpriteFamily = .claude
 
-    /// Resolves the sprite sheet name with fallback chain: exact emotion -> nearby base emotion -> neutral.
+    /// Resolves the sprite sheet name with fallback chain: exact emotion -> nearby base emotion -> neutral -> idle.
     var spriteSheetName: String {
-        let name = spriteSheetName(for: emotion)
+        if let availableName = availableSpriteSheetName(for: task, emotion: emotion) {
+            return availableName
+        }
+
+        if task != .idle, let idleName = availableSpriteSheetName(for: .idle, emotion: emotion) {
+            return idleName
+        }
+
+        return spriteSheetName(for: .idle, emotion: .neutral)
+    }
+
+    private func availableSpriteSheetName(for task: NotchiTask, emotion: NotchiEmotion) -> String? {
+        let name = spriteSheetName(for: task, emotion: emotion)
         if NSImage(named: name) != nil { return name }
         if emotion == .elated {
-            let happyName = spriteSheetName(for: .happy)
+            let happyName = spriteSheetName(for: task, emotion: .happy)
             if NSImage(named: happyName) != nil { return happyName }
         }
         if emotion == .sob {
-            let sadName = spriteSheetName(for: .sad)
+            let sadName = spriteSheetName(for: task, emotion: .sad)
             if NSImage(named: sadName) != nil { return sadName }
         }
-        return spriteSheetName(for: .neutral)
+
+        let neutralName = spriteSheetName(for: task, emotion: .neutral)
+        return NSImage(named: neutralName) != nil ? neutralName : nil
     }
 
-    private func spriteSheetName(for emotion: NotchiEmotion) -> String {
+    private func spriteSheetName(for task: NotchiTask, emotion: NotchiEmotion) -> String {
         "\(spriteFamily.rawValue)_\(task.spritePrefix)_\(emotion.rawValue)"
     }
 
@@ -128,12 +154,30 @@ struct NotchiState: Equatable {
     }
 
     private var loopDuration: Double {
-        if task == .idle, emotion == .happy {
-            return Self.happyIdleLoopDuration
+        if let targetFPS {
+            return Double(frameCount) / targetFPS
         }
 
         return task.loopDuration
     }
+
+    private var targetFPS: Double? {
+        if task == .compacting {
+            return task.animationFPS
+        }
+
+        switch (spriteFamily, task, emotion) {
+        case (.claude, .idle, .elated),
+             (.claude, .idle, .happy),
+             (.codex, .idle, .elated),
+             (.codex, .idle, .happy),
+             (.codex, .working, .happy):
+            return Self.expressiveSpriteTargetFPS
+        default:
+            return nil
+        }
+    }
+
     var bobDuration: Double { task.bobDuration }
     var bobAmplitude: CGFloat {
         switch emotion {

@@ -25,7 +25,7 @@ final class SessionData: Identifiable {
     private(set) var task: NotchiTask = .idle
     let emotionState = EmotionState()
     var state: NotchiState {
-        NotchiState(task: task, emotion: emotionState.currentEmotion)
+        NotchiState(task: task, emotion: emotionState.currentEmotion, spriteFamily: provider.spriteFamily)
     }
     private(set) var isProcessing: Bool = false
     private(set) var lastActivity: Date
