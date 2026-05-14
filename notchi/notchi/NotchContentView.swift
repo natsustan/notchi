@@ -47,12 +47,12 @@ struct NotchContentView: View {
         let sessionId: String
     }
 
-    private struct LaunchWave {
+    struct LaunchWave: Equatable {
         let state: NotchiState
         let startedAt: Date
     }
 
-    private struct HeaderSpriteContent {
+    struct HeaderSpriteContent: Equatable {
         let state: NotchiState
         let startedAt: Date
         let repeatsAnimation: Bool
@@ -110,8 +110,22 @@ struct NotchContentView: View {
     private var collapsedMode: NotchPanelManager.CollapsedMode { panelManager.collapsedMode }
     private var isCompactIdle: Bool { !isExpanded && collapsedMode == .compactIdle }
     private var headerSpriteContent: HeaderSpriteContent? {
-        if let activeSession {
-            return HeaderSpriteContent(state: activeSession.state)
+        Self.resolveHeaderSpriteContent(
+            activeSessionState: activeSession?.state,
+            launchWave: launchWave,
+            isCompactIdle: isCompactIdle,
+            launchSpriteFamily: launchSpriteFamily
+        )
+    }
+
+    static func resolveHeaderSpriteContent(
+        activeSessionState: NotchiState?,
+        launchWave: LaunchWave?,
+        isCompactIdle: Bool,
+        launchSpriteFamily: NotchiSpriteFamily
+    ) -> HeaderSpriteContent? {
+        if let activeSessionState {
+            return HeaderSpriteContent(state: activeSessionState)
         }
 
         if let launchWave {
@@ -571,6 +585,7 @@ struct NotchContentView: View {
         }
 
         Self.hasPlayedLaunchWave = true
+        isLaunchWavePreparing = false
         launchWave = LaunchWave(
             state: NotchiState(task: .waving, spriteFamily: provider.spriteFamily),
             startedAt: Date()
@@ -580,13 +595,11 @@ struct NotchContentView: View {
 
         guard !Task.isCancelled else {
             launchWave = nil
-            isLaunchWavePreparing = false
             return
         }
 
         withAnimation(launchWavePreparationAnimation) {
             launchWave = nil
-            isLaunchWavePreparing = false
         }
     }
 
