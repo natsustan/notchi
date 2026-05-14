@@ -31,6 +31,7 @@ private enum SpriteHandoffTiming {
 
 private enum LaunchWaveTiming {
     static let startDelay = 1.0
+    static let preparationDuration = 0.45
     static let spriteScale: CGFloat = 1.2
     static let horizontalOffset: CGFloat = 5
 }
@@ -90,6 +91,7 @@ struct NotchContentView: View {
     @State private var spriteHandoffGeneration = 0
     @State private var launchGlowVisible = false
     @State private var launchGlowProgress: Double = 0
+    @State private var isLaunchWavePreparing = false
     @State private var launchWave: LaunchWave?
     @State private var launchSpriteFamily = AppSettings.lastUsedAgentProvider.spriteFamily
     @MainActor private static var hasPlayedLaunchGlow = false
@@ -248,6 +250,10 @@ struct NotchContentView: View {
         return isActivityCollapsed ? collapsedHeight : fullHeight
     }
 
+    private var launchWavePreparationAnimation: Animation {
+        .easeInOut(duration: LaunchWaveTiming.preparationDuration)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             notchLayout
@@ -330,6 +336,7 @@ struct NotchContentView: View {
         .animation(panelAnimation, value: isExpanded)
         .animation(.easeInOut(duration: 0.18), value: collapsedMode)
         .animation(collapsedHoverAnimation, value: panelManager.isCollapsedHovered)
+        .animation(launchWavePreparationAnimation, value: isLaunchWavePreparing)
         .onAppear(perform: startLaunchGlow)
         .task {
             await startLaunchWave()
@@ -464,7 +471,7 @@ struct NotchContentView: View {
 
     @ViewBuilder
     private var headerRow: some View {
-        if isCompactIdle && launchWave == nil {
+        if isCompactIdle && launchWave == nil && !isLaunchWavePreparing {
             Color.clear
                 .frame(width: compactContentWidth)
         } else {
@@ -554,9 +561,15 @@ struct NotchContentView: View {
         let provider = AppSettings.lastUsedAgentProvider
         launchSpriteFamily = provider.spriteFamily
 
+        isLaunchWavePreparing = true
+
         try? await Task.sleep(for: .seconds(LaunchWaveTiming.startDelay))
 
-        guard !Task.isCancelled, !Self.hasPlayedLaunchWave else { return }
+        guard !Task.isCancelled, !Self.hasPlayedLaunchWave else {
+            isLaunchWavePreparing = false
+            return
+        }
+
         Self.hasPlayedLaunchWave = true
         launchWave = LaunchWave(
             state: NotchiState(task: .waving, spriteFamily: provider.spriteFamily),
@@ -565,8 +578,16 @@ struct NotchContentView: View {
 
         try? await Task.sleep(for: .seconds(NotchiState.launchWaveDuration))
 
-        guard !Task.isCancelled else { return }
-        launchWave = nil
+        guard !Task.isCancelled else {
+            launchWave = nil
+            isLaunchWavePreparing = false
+            return
+        }
+
+        withAnimation(launchWavePreparationAnimation) {
+            launchWave = nil
+            isLaunchWavePreparing = false
+        }
     }
 
     private func toggleMute() {
