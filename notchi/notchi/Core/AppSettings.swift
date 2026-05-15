@@ -90,8 +90,11 @@ struct AppSettings {
     static let hideSpriteWhenIdleKey = "hideSpriteWhenIdle"
 
     private static let notificationSoundKey = "notificationSound"
+    private static let notificationSoundSelectionKey = "notificationSoundSelection"
+    private static let customNotificationSoundsKey = "customNotificationSounds"
     private static let isMutedKey = "isMuted"
     private static let previousSoundKey = "previousNotificationSound"
+    private static let previousSoundSelectionKey = "previousNotificationSoundSelection"
     private static let isUsageEnabledKey = "isUsageEnabled"
     private static let claudeUsageRecoverySnapshotKey = "claudeUsageRecoverySnapshot"
     private static let claudeExtraUsageObservationKey = "claudeExtraUsageObservation"
@@ -235,17 +238,119 @@ struct AppSettings {
         }
     }
 
-    static var notificationSound: NotificationSound {
+    static var notificationSoundSelection: NotificationSoundSelection {
         get {
+            if let data = UserDefaults.standard.data(forKey: notificationSoundSelectionKey),
+               let selection = try? JSONDecoder().decode(NotificationSoundSelection.self, from: data) {
+                return selection
+            }
+
             guard let rawValue = UserDefaults.standard.string(forKey: notificationSoundKey),
                   let sound = NotificationSound(rawValue: rawValue) else {
-                return .purr
+                return .defaultValue
             }
-            return sound
+            return .system(sound)
         }
         set {
-            UserDefaults.standard.set(newValue.rawValue, forKey: notificationSoundKey)
+            if let data = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(data, forKey: notificationSoundSelectionKey)
+            }
+            if case .system(let sound) = newValue {
+                UserDefaults.standard.set(sound.rawValue, forKey: notificationSoundKey)
+            }
+            UserDefaults.standard.set(newValue == .system(.none), forKey: isMutedKey)
         }
+    }
+
+    static var customNotificationSounds: [CustomNotificationSound] {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: customNotificationSoundsKey),
+                  let sounds = try? JSONDecoder().decode([CustomNotificationSound].self, from: data) else {
+                return []
+            }
+            return sounds.sorted { $0.createdAt > $1.createdAt }
+        }
+        set {
+            let newestFirst = newValue.sorted { $0.createdAt > $1.createdAt }
+            if let data = try? JSONEncoder().encode(newestFirst) {
+                UserDefaults.standard.set(data, forKey: customNotificationSoundsKey)
+            }
+        }
+    }
+
+    static func importCustomNotificationSound(from sourceURL: URL) throws -> CustomNotificationSound {
+        let directory = customNotificationSoundsDirectory()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let displayName = sourceURL.deletingPathExtension().lastPathComponent
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let destinationFileName = uniqueCustomSoundFileName(for: sourceURL)
+        let destinationURL = directory.appendingPathComponent(destinationFileName)
+
+        try FileManager.default.copyItem(at: sourceURL, to: destinationURL)
+
+        let sound = CustomNotificationSound(
+            id: UUID(),
+            displayName: displayName.isEmpty ? sourceURL.lastPathComponent : displayName,
+            fileName: destinationFileName,
+            createdAt: Date()
+        )
+        customNotificationSounds = [sound] + customNotificationSounds
+        return sound
+    }
+
+    static func customNotificationSoundURL(for sound: CustomNotificationSound) -> URL {
+        customNotificationSoundsDirectory().appendingPathComponent(sound.fileName)
+    }
+
+    static func renameCustomNotificationSound(id: UUID, displayName: String) {
+        let trimmed = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        customNotificationSounds = customNotificationSounds.map { sound in
+            guard sound.id == id else { return sound }
+            var renamed = sound
+            renamed.displayName = trimmed
+            return renamed
+        }
+    }
+
+    static func deleteCustomNotificationSound(id: UUID) {
+        if let sound = customNotificationSounds.first(where: { $0.id == id }) {
+            let url = customNotificationSoundURL(for: sound)
+            try? FileManager.default.removeItem(at: url)
+        }
+
+        customNotificationSounds = customNotificationSounds.filter { $0.id != id }
+        notificationSoundSelection = notificationSoundSelection.fallbackIfDeletingCustomSound(id: id)
+        previousSoundSelection = previousSoundSelection?.fallbackIfDeletingCustomSound(id: id)
+    }
+
+    private static func customNotificationSoundsDirectory() -> URL {
+        let applicationSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return applicationSupport
+            .appendingPathComponent("Notchi", isDirectory: true)
+            .appendingPathComponent("Sounds", isDirectory: true)
+    }
+
+    private static func uniqueCustomSoundFileName(for sourceURL: URL) -> String {
+        let fileExtension = sourceURL.pathExtension
+        let baseName = sourceURL.deletingPathExtension().lastPathComponent
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let safeBaseName = sanitizedFileName(baseName.isEmpty ? "sound" : baseName)
+        let id = UUID().uuidString
+
+        if fileExtension.isEmpty {
+            return "\(safeBaseName)-\(id)"
+        }
+        return "\(safeBaseName)-\(id).\(fileExtension)"
+    }
+
+    private static func sanitizedFileName(_ name: String) -> String {
+        let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-_ ."))
+        let scalars = name.unicodeScalars.map { allowed.contains($0) ? Character($0) : "-" }
+        let sanitized = String(scalars).trimmingCharacters(in: .whitespacesAndNewlines)
+        return sanitized.isEmpty ? "sound" : sanitized
     }
 
     static var isMuted: Bool {
@@ -255,12 +360,35 @@ struct AppSettings {
 
     static func toggleMute() {
         if isMuted {
-            notificationSound = previousSound ?? .purr
+            notificationSoundSelection = previousSoundSelection ?? previousSound.map(NotificationSoundSelection.system) ?? .defaultValue
             isMuted = false
         } else {
-            previousSound = notificationSound
-            notificationSound = .none
+            previousSoundSelection = notificationSoundSelection
+            if case .system(let sound) = notificationSoundSelection {
+                previousSound = sound
+            } else {
+                previousSound = nil
+            }
+            notificationSoundSelection = .system(.none)
             isMuted = true
+        }
+    }
+
+    private static var previousSoundSelection: NotificationSoundSelection? {
+        get {
+            guard let data = UserDefaults.standard.data(forKey: previousSoundSelectionKey) else {
+                return nil
+            }
+            return try? JSONDecoder().decode(NotificationSoundSelection.self, from: data)
+        }
+        set {
+            guard let newValue else {
+                UserDefaults.standard.removeObject(forKey: previousSoundSelectionKey)
+                return
+            }
+            if let data = try? JSONEncoder().encode(newValue) {
+                UserDefaults.standard.set(data, forKey: previousSoundSelectionKey)
+            }
         }
     }
 
@@ -272,7 +400,11 @@ struct AppSettings {
             return NotificationSound(rawValue: rawValue)
         }
         set {
-            UserDefaults.standard.set(newValue?.rawValue, forKey: previousSoundKey)
+            guard let newValue else {
+                UserDefaults.standard.removeObject(forKey: previousSoundKey)
+                return
+            }
+            UserDefaults.standard.set(newValue.rawValue, forKey: previousSoundKey)
         }
     }
 }
