@@ -9,8 +9,8 @@ final class SoundSelector {
     private static let rowSpacing: CGFloat = 4
     private static let maxVisibleRows = 6
 
-    var expandedHeight: CGFloat {
-        let soundCount = NotificationSound.allCases.count
+    func expandedHeight(customSoundCount: Int) -> CGFloat {
+        let soundCount = 1 + customSoundCount + NotificationSound.allCases.count
         let visibleCount = min(soundCount, Self.maxVisibleRows)
         return CGFloat(visibleCount) * Self.rowHeight + CGFloat(visibleCount - 1) * Self.rowSpacing
     }
