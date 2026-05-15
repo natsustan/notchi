@@ -162,6 +162,21 @@ final class UsageBarViewTests: XCTestCase {
         XCTAssertFalse(view.shouldShowExtraUsageIndicator)
     }
 
+    func testBarFillPercentageClampsAboveQuota() {
+        let view = UsageBarView(
+            usage: QuotaPeriod(utilization: 125, resetDate: Date(timeIntervalSince1970: 4_102_444_800)),
+            isUsingExtraUsage: true,
+            isLoading: false,
+            error: nil,
+            statusMessage: nil,
+            isStale: false,
+            recoveryAction: .none,
+            isEnabled: true
+        )
+
+        XCTAssertEqual(view.barFillPercentage, 100)
+    }
+
     func testResetLabelTextIncludesProviderPrefixWhenProvided() {
         let view = UsageBarView(
             usage: QuotaPeriod(utilization: 12, resetDate: Date(timeIntervalSince1970: 4_102_444_800)),

@@ -59,6 +59,10 @@ struct UsageBarView: View {
         return usage.usagePercentage
     }
 
+    var barFillPercentage: Int {
+        min(max(effectivePercentage, 0), 100)
+    }
+
     private var usageColor: Color {
         guard usage != nil else { return TerminalColors.dimmedText }
         if isStale { return TerminalColors.dimmedText }
@@ -205,7 +209,7 @@ struct UsageBarView: View {
                 if usage != nil {
                     RoundedRectangle(cornerRadius: 2)
                         .fill(usageColor)
-                        .frame(width: geometry.size.width * Double(effectivePercentage) / 100)
+                        .frame(width: geometry.size.width * Double(barFillPercentage) / 100)
                 }
             }
         }
