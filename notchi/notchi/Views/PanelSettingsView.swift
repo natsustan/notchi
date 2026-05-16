@@ -13,8 +13,53 @@ private struct StatusBadge {
     let color: Color
 }
 
+enum PanelUsageBadgeState: Equatable {
+    case connected
+    case setup
+
+    var text: String {
+        switch self {
+        case .connected:
+            "Connected"
+        case .setup:
+            "Set Up"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .connected:
+            TerminalColors.green
+        case .setup:
+            TerminalColors.amber
+        }
+    }
+
+    static func resolve(
+        isClaudeUsageConnected: Bool,
+        hasActiveClaudeSession: Bool,
+        hasActiveCodexSession: Bool,
+        codexHooksInstalled: Bool
+    ) -> PanelUsageBadgeState {
+        if isClaudeUsageConnected {
+            return .connected
+        }
+
+        if hasActiveClaudeSession {
+            return .setup
+        }
+
+        if hasActiveCodexSession, codexHooksInstalled {
+            return .connected
+        }
+
+        return .setup
+    }
+}
+
 struct PanelSettingsView: View {
     @Binding private var showingEmotionAnalysisSettings: Bool
+    private let sessionStore: SessionStore
     @AppStorage(AppSettings.hideSpriteWhenIdleKey) private var hideSpriteWhenIdle = false
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var claudeHooksInstalled = IntegrationCoordinator.shared.isInstalled(for: .claude)
@@ -25,8 +70,12 @@ struct PanelSettingsView: View {
     @ObservedObject private var updateManager = UpdateManager.shared
     private var usageConnected: Bool { ClaudeUsageService.shared.isConnected }
 
-    init(showingEmotionAnalysisSettings: Binding<Bool> = .constant(false)) {
+    init(
+        showingEmotionAnalysisSettings: Binding<Bool> = .constant(false),
+        sessionStore: SessionStore? = nil
+    ) {
         _showingEmotionAnalysisSettings = showingEmotionAnalysisSettings
+        self.sessionStore = sessionStore ?? .shared
     }
 
     var body: some View {
@@ -324,9 +373,14 @@ struct PanelSettingsView: View {
     }
 
     private func usageStatus() -> StatusBadge {
-        usageConnected
-            ? StatusBadge(text: "Connected", color: TerminalColors.green)
-            : StatusBadge(text: "Set Up", color: TerminalColors.amber)
+        let sessions = sessionStore.sortedSessions
+        let state = PanelUsageBadgeState.resolve(
+            isClaudeUsageConnected: usageConnected,
+            hasActiveClaudeSession: sessions.contains { $0.provider == .claude },
+            hasActiveCodexSession: sessions.contains { $0.provider == .codex },
+            codexHooksInstalled: codexHooksInstalled
+        )
+        return StatusBadge(text: state.text, color: state.color)
     }
 
     private func installHooksIfNeeded(for provider: AgentProvider) {
