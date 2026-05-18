@@ -132,9 +132,13 @@ final class SessionStore {
             }
 
         case .permissionRequest:
-            let question = Self.buildPermissionQuestion(tool: event.tool, toolInput: event.toolInput)
             session.updateTask(.waiting)
-            session.setPendingQuestions([question])
+            if event.tool == "AskUserQuestion" {
+                session.setPendingQuestions(Self.parseQuestions(from: event.toolInput))
+            } else {
+                let question = Self.buildPermissionQuestion(tool: event.tool, toolInput: event.toolInput)
+                session.setPendingQuestions([question])
+            }
 
         case .postToolUse:
             let success = event.status != "error"
@@ -389,8 +393,28 @@ final class SessionStore {
                 guard let label = opt["label"] as? String else { return nil }
                 return (label: label, description: opt["description"] as? String)
             }
-            return PendingQuestion(question: questionText, header: header, options: options)
+            return PendingQuestion(
+                question: questionText,
+                header: header,
+                options: Self.optionsWithFreeTextChoice(options)
+            )
         }
+    }
+
+    private static func optionsWithFreeTextChoice(
+        _ options: [(label: String, description: String?)]
+    ) -> [(label: String, description: String?)] {
+        let trimmed = Self.freeTextLabelNormalized(PendingQuestion.freeTextOptionLabel)
+        let alreadyIncludesFreeText = options.contains { option in
+            Self.freeTextLabelNormalized(option.label).caseInsensitiveCompare(trimmed) == .orderedSame
+        }
+
+        guard !alreadyIncludesFreeText else { return options }
+        return options + [(label: PendingQuestion.freeTextOptionLabel, description: nil)]
+    }
+
+    private static func freeTextLabelNormalized(_ label: String) -> String {
+        label.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
     }
 
     private static let localSlashCommands: Set<String> = [

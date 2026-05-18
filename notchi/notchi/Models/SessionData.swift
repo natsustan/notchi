@@ -1,5 +1,7 @@
 import Foundation
 struct PendingQuestion {
+    static let freeTextOptionLabel = "Type something."
+
     let question: String
     let header: String?
     let options: [(label: String, description: String?)]

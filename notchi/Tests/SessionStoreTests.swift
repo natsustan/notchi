@@ -91,6 +91,118 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertNotNil(session.promptSubmitTime)
     }
 
+    func testPermissionRequestForAskUserQuestionUsesProvidedOptions() {
+        let store = SessionStore.shared
+        let session = store.process(makeEvent(
+            sessionId: "ask-user-question-permission-\(UUID().uuidString)",
+            event: .permissionRequest,
+            status: "waiting_for_input",
+            tool: "AskUserQuestion",
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "question": "What do you mean by \"toll permissions prompt\"?",
+                        "header": "Intent",
+                        "options": [
+                            [
+                                "label": "Trigger a tool permission prompt",
+                                "description": "Run a command that requires your approval",
+                            ],
+                            [
+                                "label": "Configure tool permissions",
+                                "description": "Edit Claude settings",
+                            ],
+                            [
+                                "label": "Chat about this",
+                            ],
+                        ],
+                    ],
+                ]),
+            ]
+        ))
+
+        XCTAssertEqual(session.task, .waiting)
+        XCTAssertEqual(session.pendingQuestions.count, 1)
+        XCTAssertEqual(session.pendingQuestions[0].header, "Intent")
+        XCTAssertEqual(
+            session.pendingQuestions[0].question,
+            "What do you mean by \"toll permissions prompt\"?"
+        )
+        XCTAssertEqual(
+            session.pendingQuestions[0].options.map(\.label),
+            [
+                "Trigger a tool permission prompt",
+                "Configure tool permissions",
+                "Chat about this",
+                "Type something.",
+            ]
+        )
+        XCTAssertEqual(
+            session.pendingQuestions[0].options.map(\.description),
+            [
+                "Run a command that requires your approval",
+                "Edit Claude settings",
+                nil,
+                nil,
+            ]
+        )
+    }
+
+    func testPreToolUseForAskUserQuestionUsesProvidedOptionsAndFreeTextChoice() {
+        let store = SessionStore.shared
+        let session = store.process(makeEvent(
+            sessionId: "ask-user-question-pretool-\(UUID().uuidString)",
+            event: .preToolUse,
+            status: "running_tool",
+            tool: "AskUserQuestion",
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "question": "Which path?",
+                        "header": "Path",
+                        "options": [
+                            ["label": "Fast"],
+                            ["label": "Careful"],
+                        ],
+                    ],
+                ]),
+            ]
+        ))
+
+        XCTAssertEqual(session.task, .waiting)
+        XCTAssertEqual(session.pendingQuestions.count, 1)
+        XCTAssertEqual(
+            session.pendingQuestions[0].options.map(\.label),
+            ["Fast", "Careful", PendingQuestion.freeTextOptionLabel]
+        )
+    }
+
+    func testAskUserQuestionDoesNotDuplicateProvidedFreeTextOption() {
+        let store = SessionStore.shared
+        let session = store.process(makeEvent(
+            sessionId: "ask-user-question-free-text-dedupe-\(UUID().uuidString)",
+            event: .preToolUse,
+            status: "running_tool",
+            tool: "AskUserQuestion",
+            toolInput: [
+                "questions": AnyCodable([
+                    [
+                        "question": "Which path?",
+                        "options": [
+                            ["label": "Fast"],
+                            ["label": "Type something"],
+                        ],
+                    ],
+                ]),
+            ]
+        ))
+
+        XCTAssertEqual(
+            session.pendingQuestions[0].options.map(\.label),
+            ["Fast", "Type something"]
+        )
+    }
+
     func testDisplaySessionNumbersRenumberAfterDismissal() {
         let store = SessionStore.shared
         let cwd = "/tmp/notchi"
@@ -482,7 +594,8 @@ final class SessionStoreTests: XCTestCase {
         userPrompt: String? = nil,
         userPromptHasAttachments: Bool = false,
         tool: String? = nil,
-        toolUseId: String? = nil
+        toolUseId: String? = nil,
+        toolInput: [String: AnyCodable]? = nil
     ) -> HookEvent {
         HookEvent(
             provider: provider,
@@ -492,7 +605,7 @@ final class SessionStoreTests: XCTestCase {
             event: event,
             status: status,
             tool: tool,
-            toolInput: nil,
+            toolInput: toolInput,
             toolUseId: toolUseId,
             userPrompt: userPrompt,
             userPromptHasAttachments: userPromptHasAttachments,
