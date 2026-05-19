@@ -33,9 +33,31 @@ final class NotchPanel: NSPanel {
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
 
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .leftMouseDown, !isKeyWindow {
+            makeKey()
+        }
+        super.sendEvent(event)
+    }
+
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 53 {
             NotificationCenter.default.post(name: .notchiShouldCollapse, object: nil)
+            return
         }
+
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        if modifiers.isEmpty,
+           let character = event.charactersIgnoringModifiers?.first,
+           let optionNumber = Int(String(character)),
+           optionNumber > 0 {
+            NotificationCenter.default.post(
+                name: .notchiQuestionOptionShortcut,
+                object: optionNumber
+            )
+            return
+        }
+
+        super.keyDown(with: event)
     }
 }

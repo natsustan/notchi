@@ -56,12 +56,14 @@ struct ActivityRowView: View {
 
 struct QuestionPromptView: View {
     let questions: [PendingQuestion]
-    let onSelectOption: ((Int, Int) -> Void)?
+    let onSelectOption: ((Int, Int) -> Bool)?
     @State private var currentIndex = 0
+    @State private var hoveredOptionIndex: Int?
+    @State private var isSubmitting = false
 
     init(
         questions: [PendingQuestion],
-        onSelectOption: ((Int, Int) -> Void)? = nil
+        onSelectOption: ((Int, Int) -> Bool)? = nil
     ) {
         self.questions = questions
         self.onSelectOption = onSelectOption
@@ -80,11 +82,12 @@ struct QuestionPromptView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 0) {
             questionHeader
+                .padding(.bottom, 5)
             questionText
+                .padding(.bottom, 6)
             optionsList
-            answerHint
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -97,6 +100,12 @@ struct QuestionPromptView: View {
         .padding(.vertical, 4)
         .onChange(of: questions.count) {
             currentIndex = 0
+            hoveredOptionIndex = nil
+            isSubmitting = false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .notchiQuestionOptionShortcut)) { notification in
+            guard let optionNumber = notification.object as? Int else { return }
+            selectOption(index: optionNumber - 1)
         }
     }
 
@@ -152,50 +161,128 @@ struct QuestionPromptView: View {
     }
 
     private var optionsList: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(current.options.enumerated()), id: \.offset) { index, option in
                 let isInteractive = onSelectOption != nil
                 let isFreeTextOption = PendingQuestion.isFreeTextOptionLabel(option.label)
-                let isDisabledFreeText = isInteractive && isFreeTextOption
 
                 if isInteractive, !isFreeTextOption {
                     Button {
-                        onSelectOption?(clampedIndex, index)
+                        selectOption(index: index)
                     } label: {
-                        optionRow(index: index, option: option, isDisabled: false)
+                        highlightedOptionRow(index: index, option: option)
                     }
                     .buttonStyle(.plain)
-                } else {
-                    optionRow(
+                    .disabled(isSubmitting)
+                } else if isInteractive {
+                    highlightedOptionRow(
                         index: index,
-                        option: option,
-                        isDisabled: isDisabledFreeText,
-                        fallbackDescription: isDisabledFreeText ? "Use terminal for custom text" : nil
+                        option: (
+                            label: option.label,
+                            description: option.description ?? "Use terminal for custom text"
+                        )
                     )
+                } else {
+                    optionRow(index: index, option: option)
                 }
             }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func highlightedOptionRow(
+        index: Int,
+        option: (label: String, description: String?)
+    ) -> some View {
+        let isHovered = hoveredOptionIndex == index
+        let style = highlightedOptionStyle(isHovered: isHovered)
+
+        return HStack(alignment: .center, spacing: 9) {
+            Text("\(index + 1)")
+                .font(.system(size: 9, weight: .semibold).monospacedDigit())
+                .foregroundColor(TerminalColors.primaryText.opacity(0.82))
+                .frame(width: 20, height: 20)
+                .background(
+                    RoundedRectangle(cornerRadius: 5, style: .continuous)
+                        .fill(style.badgeFill)
+                )
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(option.label)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(TerminalColors.primaryText)
+                if let description = option.description {
+                    Text(description)
+                        .font(.system(size: 10))
+                        .foregroundColor(TerminalColors.secondaryText)
+                        .lineLimit(2)
+                }
+            }
+        }
+        .padding(.horizontal, 7)
+        .padding(.vertical, 5)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(style.rowFill)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(style.stroke, lineWidth: 1)
+                )
+        )
+        .contentShape(RoundedRectangle(cornerRadius: 8))
+        .onHover { isHovering in
+            if isHovering {
+                hoveredOptionIndex = index
+            } else if hoveredOptionIndex == index {
+                hoveredOptionIndex = nil
+            }
+        }
+        .animation(.easeOut(duration: 0.12), value: isHovered)
+    }
+
+    private func highlightedOptionStyle(isHovered: Bool) -> (
+        rowFill: Color,
+        badgeFill: Color,
+        stroke: Color
+    ) {
+        (
+            rowFill: TerminalColors.claudeOrange.opacity(isHovered ? 0.32 : 0.22),
+            badgeFill: TerminalColors.claudeOrangeDeep.opacity(isHovered ? 1 : 0.92),
+            stroke: TerminalColors.claudeOrange.opacity(isHovered ? 0.42 : 0.16)
+        )
+    }
+
+    private func selectOption(index optionIndex: Int) {
+        guard !isSubmitting,
+              let onSelectOption,
+              current.options.indices.contains(optionIndex),
+              !PendingQuestion.isFreeTextOptionLabel(current.options[optionIndex].label) else {
+            return
+        }
+
+        isSubmitting = true
+        let didSubmit = onSelectOption(clampedIndex, optionIndex)
+        if !didSubmit {
+            isSubmitting = false
         }
     }
 
     private func optionRow(
         index: Int,
-        option: (label: String, description: String?),
-        isDisabled: Bool,
-        fallbackDescription: String? = nil
+        option: (label: String, description: String?)
     ) -> some View {
-        let description = option.description ?? fallbackDescription
-
-        return HStack(alignment: .top, spacing: 6) {
+        HStack(alignment: .top, spacing: 6) {
             Text("\(index + 1).")
                 .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                .foregroundColor(isDisabled ? TerminalColors.dimmedText : TerminalColors.claudeOrange)
+                .foregroundColor(TerminalColors.claudeOrange)
                 .frame(width: 16, alignment: .trailing)
 
             VStack(alignment: .leading, spacing: 1) {
                 Text(option.label)
                     .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(isDisabled ? TerminalColors.dimmedText : TerminalColors.primaryText)
-                if let description {
+                    .foregroundColor(TerminalColors.primaryText)
+                if let description = option.description {
                     Text(description)
                         .font(.system(size: 10))
                         .foregroundColor(TerminalColors.dimmedText)
@@ -204,12 +291,6 @@ struct QuestionPromptView: View {
             }
         }
         .contentShape(Rectangle())
-    }
-
-    private var answerHint: some View {
-        Text(onSelectOption == nil ? "Answer in terminal" : "Select an option")
-            .font(.system(size: 10).italic())
-            .foregroundColor(TerminalColors.dimmedText)
     }
 }
 
