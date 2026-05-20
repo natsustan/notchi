@@ -131,10 +131,17 @@ tool_input = input_data.get('tool_input', {})
 if tool_input:
     output['tool_input'] = tool_input
 
+permission_suggestions = input_data.get('permission_suggestions', [])
+if permission_suggestions:
+    output['permission_suggestions'] = permission_suggestions
+
 def should_wait_for_response():
-    # PreToolUse is the normal Claude AskUserQuestion path. Keep
-    # PermissionRequest for Claude versions/events that surface it there.
-    return hook_event in ('PreToolUse', 'PermissionRequest') and tool == 'AskUserQuestion'
+    if os.environ.get('NOTCHI_INTERACTIVE', 'true') != 'true':
+        return False
+
+    return hook_event == 'PermissionRequest' or (
+        hook_event == 'PreToolUse' and tool == 'AskUserQuestion'
+    )
 
 try:
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)

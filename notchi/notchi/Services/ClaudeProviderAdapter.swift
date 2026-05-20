@@ -39,6 +39,7 @@ struct ClaudeProviderAdapter: AgentProviderAdapter {
             toolUseId: envelope.toolUseId,
             userPrompt: envelope.userPrompt,
             permissionMode: envelope.permissionMode,
+            permissionSuggestions: envelope.permissionSuggestions,
             interactive: envelope.interactive,
             claudeProcessId: envelope.claudeProcessId,
             interactionRequestId: HookInteractionRequest.id(for: envelope)

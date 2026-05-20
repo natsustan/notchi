@@ -66,4 +66,16 @@ final class HookInstallerTests: XCTestCase {
         XCTAssertEqual(sessionStartHooks.count, 1)
         XCTAssertEqual(sessionStartHooks.first?["command"] as? String, HookInstaller.hookCommand)
     }
+
+    func testBundledHookDoesNotWaitForHeadlessPermissionRequests() throws {
+        let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let hookScript = testDirectory
+            .deletingLastPathComponent()
+            .appendingPathComponent("notchi/Resources/notchi-hook.sh")
+        let script = try String(contentsOf: hookScript)
+
+        XCTAssertTrue(script.contains("def should_wait_for_response():"))
+        XCTAssertTrue(script.contains("os.environ.get('NOTCHI_INTERACTIVE', 'true') != 'true'"))
+        XCTAssertTrue(script.contains("return hook_event == 'PermissionRequest'"))
+    }
 }

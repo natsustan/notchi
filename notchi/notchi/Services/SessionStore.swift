@@ -127,7 +127,7 @@ final class SessionStore {
                 session.updateTask(.waiting)
                 session.setPendingQuestions(
                     Self.parseQuestions(from: event.toolInput),
-                    responseContext: Self.buildQuestionResponseContext(for: event)
+                    responseContext: Self.buildQuestionResponseContext(for: event, kind: .askUserQuestion)
                 )
             } else {
                 session.clearPendingQuestions()
@@ -139,11 +139,18 @@ final class SessionStore {
             if event.tool == "AskUserQuestion" {
                 session.setPendingQuestions(
                     Self.parseQuestions(from: event.toolInput),
-                    responseContext: Self.buildQuestionResponseContext(for: event)
+                    responseContext: Self.buildQuestionResponseContext(for: event, kind: .askUserQuestion)
                 )
             } else {
-                let question = Self.buildPermissionQuestion(tool: event.tool, toolInput: event.toolInput)
-                session.setPendingQuestions([question])
+                let question = Self.buildPermissionQuestion(
+                    tool: event.tool,
+                    toolInput: event.toolInput,
+                    permissionSuggestions: event.permissionSuggestions
+                )
+                session.setPendingQuestions(
+                    [question],
+                    responseContext: Self.buildQuestionResponseContext(for: event, kind: .permissionRequest)
+                )
             }
 
         case .postToolUse:
@@ -329,6 +336,14 @@ final class SessionStore {
             return false
         }
 
+        if context.kind == .permissionRequest {
+            return answerPermissionRequest(
+                session: session,
+                context: context,
+                selectedOptionIndexesByQuestion: selectedOptionIndexesByQuestion
+            )
+        }
+
         var answers: [String: String] = [:]
         for questionIndex in session.pendingQuestions.indices {
             guard let optionIndex = selectedOptionIndexesByQuestion[questionIndex] else {
@@ -368,6 +383,39 @@ final class SessionStore {
         return true
     }
 
+    private func answerPermissionRequest(
+        session: SessionData,
+        context: PendingQuestionResponseContext,
+        selectedOptionIndexesByQuestion: [Int: Int]
+    ) -> Bool {
+        guard selectedOptionIndexesByQuestion.count == 1,
+              let optionIndex = selectedOptionIndexesByQuestion[0],
+              let question = session.pendingQuestions.first,
+              question.options.indices.contains(optionIndex),
+              let decision = PermissionRequestDecision(optionLabel: question.options[optionIndex].label),
+              let responseData = HookInteractionResponse.makePermissionRequestResponse(
+                decision: decision,
+                hookEventName: context.hookEventName,
+                toolInput: context.toolInput,
+                permissionSuggestions: context.permissionSuggestions
+              ) else {
+            return false
+        }
+
+        guard HookInteractionResponseBroker.shared.submitResponse(
+            responseData,
+            for: context.requestId
+        ) else {
+            session.clearPendingQuestions()
+            session.updateTask(.idle)
+            return false
+        }
+
+        session.clearPendingQuestions()
+        session.updateTask(.working)
+        return true
+    }
+
     @discardableResult
     func cancelPendingQuestion(in sessionKey: ProviderSessionKey) -> Bool {
         guard let session = sessions[sessionKey],
@@ -379,9 +427,7 @@ final class SessionStore {
         // otherwise Claude isn't waiting on us, so drop to .idle.
         let denySubmitted: Bool
         if let context = session.pendingQuestionResponseContext,
-           let responseData = HookInteractionResponse.makeAskUserQuestionCancellationResponse(
-               hookEventName: context.hookEventName
-           ) {
+           let responseData = Self.cancellationResponse(for: context) {
             denySubmitted = HookInteractionResponseBroker.shared.submitResponse(
                 responseData,
                 for: context.requestId
@@ -393,6 +439,22 @@ final class SessionStore {
         session.clearPendingQuestions()
         session.updateTask(denySubmitted ? .working : .idle)
         return true
+    }
+
+    private static func cancellationResponse(for context: PendingQuestionResponseContext) -> Data? {
+        switch context.kind {
+        case .askUserQuestion:
+            HookInteractionResponse.makeAskUserQuestionCancellationResponse(
+                hookEventName: context.hookEventName
+            )
+        case .permissionRequest:
+            HookInteractionResponse.makePermissionRequestResponse(
+                decision: .deny,
+                hookEventName: context.hookEventName,
+                toolInput: context.toolInput,
+                permissionSuggestions: context.permissionSuggestions
+            )
+        }
     }
 
 #if DEBUG
@@ -495,7 +557,10 @@ final class SessionStore {
         return options + [(label: PendingQuestion.freeTextOptionLabel, description: nil)]
     }
 
-    private static func buildQuestionResponseContext(for event: HookEvent) -> PendingQuestionResponseContext? {
+    private static func buildQuestionResponseContext(
+        for event: HookEvent,
+        kind: PendingQuestionResponseContext.Kind
+    ) -> PendingQuestionResponseContext? {
         guard event.provider == .claude,
               let requestId = event.interactionRequestId else {
             return nil
@@ -504,7 +569,9 @@ final class SessionStore {
         return PendingQuestionResponseContext(
             requestId: requestId,
             hookEventName: event.event.rawValue,
-            toolInput: event.toolInput
+            toolInput: event.toolInput,
+            permissionSuggestions: event.permissionSuggestions,
+            kind: kind
         )
     }
 
@@ -519,19 +586,26 @@ final class SessionStore {
         return localSlashCommands.contains(command)
     }
 
-    private static func buildPermissionQuestion(tool: String?, toolInput: [String: AnyCodable]?) -> PendingQuestion {
+    private static func buildPermissionQuestion(
+        tool: String?,
+        toolInput: [String: AnyCodable]?,
+        permissionSuggestions: [AnyCodable]?
+    ) -> PendingQuestion {
         let toolName = tool ?? "Tool"
         let input = toolInput?.mapValues { $0.value }
         let description = SessionEvent.deriveDescription(tool: tool, toolInput: input)
+        var options: [(label: String, description: String?)] = [
+            (label: PermissionRequestDecision.allowOnceLabel, description: nil),
+        ]
+        if HookInteractionResponse.hasRememberablePermissionSuggestion(permissionSuggestions) {
+            options.append((label: PermissionRequestDecision.allowAndRememberLabel, description: nil))
+        }
+        options.append((label: PermissionRequestDecision.denyLabel, description: nil))
+
         return PendingQuestion(
             question: description ?? "\(toolName) wants to proceed",
             header: "Permission Request",
-            // Claude Code permission prompts always present these three choices
-            options: [
-                (label: "Yes", description: nil),
-                (label: "Yes, and don't ask again", description: nil),
-                (label: "No", description: nil),
-            ]
+            options: options
         )
     }
 
@@ -637,12 +711,11 @@ nonisolated enum CodexFileSystem {
 nonisolated enum HookInteractionRequest {
     static let responseWaitTimeout: TimeInterval = 300
 
-    // PermissionRequest compatibility events can lack a tool_use_id, so this
-    // method may generate a fresh fallback id. Store the result on HookEvent
-    // instead of recomputing it later.
+    // PermissionRequest events lack a tool_use_id, so this method may generate
+    // a fresh fallback id. Store the result on HookEvent instead of
+    // recomputing it later.
     static func id(for envelope: AgentHookEnvelope) -> String? {
         guard envelope.provider == .claude,
-              envelope.tool == "AskUserQuestion",
               let event = NormalizedAgentEvent.claudeEvent(named: envelope.event) else {
             return nil
         }
@@ -650,6 +723,7 @@ nonisolated enum HookInteractionRequest {
         let toolUseId: String
         switch event {
         case .preToolUse:
+            guard envelope.tool == "AskUserQuestion" else { return nil }
             guard let existingToolUseId = envelope.toolUseId else { return nil }
             toolUseId = existingToolUseId
         case .permissionRequest:
@@ -726,6 +800,29 @@ nonisolated final class HookInteractionResponseBroker: @unchecked Sendable {
 #endif
 }
 
+nonisolated enum PermissionRequestDecision {
+    static let allowOnceLabel = "Yes"
+    static let allowAndRememberLabel = "Yes, and don't ask again"
+    static let denyLabel = "No"
+
+    case allowOnce
+    case allowAndRemember
+    case deny
+
+    init?(optionLabel: String) {
+        switch optionLabel {
+        case Self.allowOnceLabel:
+            self = .allowOnce
+        case Self.allowAndRememberLabel:
+            self = .allowAndRemember
+        case Self.denyLabel:
+            self = .deny
+        default:
+            return nil
+        }
+    }
+}
+
 nonisolated enum HookInteractionResponse {
     private static let userCanceledQuestionReason = "Question canceled by user."
 
@@ -792,6 +889,61 @@ nonisolated enum HookInteractionResponse {
         }
 
         return try? JSONSerialization.data(withJSONObject: output)
+    }
+
+    static func makePermissionRequestResponse(
+        decision: PermissionRequestDecision,
+        hookEventName: String,
+        toolInput: [String: AnyCodable]?,
+        permissionSuggestions: [AnyCodable]?
+    ) -> Data? {
+        let hookDecision: [String: Any]
+        switch decision {
+        case .allowOnce:
+            hookDecision = [
+                "behavior": "allow",
+                "updatedInput": recursivelyUnwrapped(toolInput) as? [String: Any] ?? [:],
+            ]
+        case .allowAndRemember:
+            guard let permissionUpdate = preferredPermissionUpdate(from: permissionSuggestions) else {
+                return nil
+            }
+            hookDecision = [
+                "behavior": "allow",
+                "updatedInput": recursivelyUnwrapped(toolInput) as? [String: Any] ?? [:],
+                "updatedPermissions": [permissionUpdate],
+            ]
+        case .deny:
+            hookDecision = [
+                "behavior": "deny",
+                "message": "User denied this action.",
+                "interrupt": false,
+            ]
+        }
+
+        let output: [String: Any] = [
+            "hookSpecificOutput": [
+                "hookEventName": hookEventName,
+                "decision": hookDecision,
+            ],
+        ]
+
+        return try? JSONSerialization.data(withJSONObject: output)
+    }
+
+    static func hasRememberablePermissionSuggestion(_ suggestions: [AnyCodable]?) -> Bool {
+        preferredPermissionUpdate(from: suggestions) != nil
+    }
+
+    private static func preferredPermissionUpdate(from suggestions: [AnyCodable]?) -> [String: Any]? {
+        guard let suggestions = recursivelyUnwrapped(suggestions) as? [[String: Any]] else { return nil }
+
+        return suggestions.first { suggestion in
+            suggestion["behavior"] as? String == "allow"
+                && suggestion["destination"] as? String == "localSettings"
+        } ?? suggestions.first { suggestion in
+            suggestion["behavior"] as? String == "allow"
+        }
     }
 
     private static func recursivelyUnwrapped(_ value: Any?) -> Any {

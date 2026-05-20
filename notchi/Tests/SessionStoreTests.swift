@@ -409,6 +409,224 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(session.task, .idle)
     }
 
+    func testAnswerPermissionRequestSubmitsAllowResponse() async throws {
+        let store = SessionStore.shared
+        let sessionId = "permission-request-allow-\(UUID().uuidString)"
+        let requestId = HookInteractionRequest.id(
+            provider: .claude,
+            rawSessionId: sessionId,
+            hookEventName: NormalizedAgentEvent.permissionRequest.rawValue,
+            toolUseId: "permission-\(UUID().uuidString)"
+        )
+        let session = store.process(makeEvent(
+            sessionId: sessionId,
+            event: .permissionRequest,
+            status: "waiting_for_input",
+            tool: "Bash",
+            toolInput: [
+                "command": AnyCodable("npm test"),
+                "description": AnyCodable("Run tests"),
+            ],
+            interactionRequestId: requestId
+        ))
+        XCTAssertEqual(session.pendingQuestions.first?.options.map(\.label), ["Yes", "No"])
+
+        let responseTask = Task.detached {
+            HookInteractionResponseBroker.shared.waitForResponse(
+                requestId: requestId,
+                timeout: 1
+            )
+        }
+        let responseWaiterRegistered = await waitUntil(timeout: 1) {
+            HookInteractionResponseBroker.shared.isWaitingForResponse(requestId: requestId)
+        }
+        XCTAssertTrue(responseWaiterRegistered)
+
+        XCTAssertTrue(store.answerPendingQuestions(
+            in: session.sessionKey,
+            selectedOptionIndexesByQuestion: [0: 0]
+        ))
+
+        let awaitedResponseData = await responseTask.value
+        let responseData = try XCTUnwrap(awaitedResponseData)
+        let response = try XCTUnwrap(JSONSerialization.jsonObject(with: responseData) as? [String: Any])
+        let hookOutput = try XCTUnwrap(response["hookSpecificOutput"] as? [String: Any])
+        let decision = try XCTUnwrap(hookOutput["decision"] as? [String: Any])
+        let updatedInput = try XCTUnwrap(decision["updatedInput"] as? [String: Any])
+
+        XCTAssertEqual(hookOutput["hookEventName"] as? String, "PermissionRequest")
+        XCTAssertEqual(decision["behavior"] as? String, "allow")
+        XCTAssertEqual(updatedInput["command"] as? String, "npm test")
+        XCTAssertNil(decision["updatedPermissions"])
+        XCTAssertTrue(session.pendingQuestions.isEmpty)
+        XCTAssertEqual(session.task, .working)
+    }
+
+    func testAnswerPermissionRequestCanSubmitRememberedAllowResponse() async throws {
+        let store = SessionStore.shared
+        let sessionId = "permission-request-remember-\(UUID().uuidString)"
+        let requestId = HookInteractionRequest.id(
+            provider: .claude,
+            rawSessionId: sessionId,
+            hookEventName: NormalizedAgentEvent.permissionRequest.rawValue,
+            toolUseId: "permission-\(UUID().uuidString)"
+        )
+        let session = store.process(makeEvent(
+            sessionId: sessionId,
+            event: .permissionRequest,
+            status: "waiting_for_input",
+            tool: "Bash",
+            toolInput: [
+                "command": AnyCodable("npm test"),
+            ],
+            permissionSuggestions: [
+                AnyCodable([
+                    "type": "addRules",
+                    "rules": [["toolName": "Bash", "ruleContent": "npm test"]],
+                    "behavior": "allow",
+                    "destination": "localSettings",
+                ]),
+            ],
+            interactionRequestId: requestId
+        ))
+        XCTAssertEqual(
+            session.pendingQuestions.first?.options.map(\.label),
+            ["Yes", "Yes, and don't ask again", "No"]
+        )
+
+        let responseTask = Task.detached {
+            HookInteractionResponseBroker.shared.waitForResponse(
+                requestId: requestId,
+                timeout: 1
+            )
+        }
+        let responseWaiterRegistered = await waitUntil(timeout: 1) {
+            HookInteractionResponseBroker.shared.isWaitingForResponse(requestId: requestId)
+        }
+        XCTAssertTrue(responseWaiterRegistered)
+
+        XCTAssertTrue(store.answerPendingQuestions(
+            in: session.sessionKey,
+            selectedOptionIndexesByQuestion: [0: 1]
+        ))
+
+        let awaitedResponseData = await responseTask.value
+        let responseData = try XCTUnwrap(awaitedResponseData)
+        let response = try XCTUnwrap(JSONSerialization.jsonObject(with: responseData) as? [String: Any])
+        let hookOutput = try XCTUnwrap(response["hookSpecificOutput"] as? [String: Any])
+        let decision = try XCTUnwrap(hookOutput["decision"] as? [String: Any])
+        let updatedPermissions = try XCTUnwrap(decision["updatedPermissions"] as? [[String: Any]])
+        let permissionUpdate = try XCTUnwrap(updatedPermissions.first)
+        let rules = try XCTUnwrap(permissionUpdate["rules"] as? [[String: Any]])
+
+        XCTAssertEqual(decision["behavior"] as? String, "allow")
+        XCTAssertEqual(permissionUpdate["destination"] as? String, "localSettings")
+        XCTAssertEqual(rules.first?["toolName"] as? String, "Bash")
+        XCTAssertEqual(rules.first?["ruleContent"] as? String, "npm test")
+        XCTAssertTrue(session.pendingQuestions.isEmpty)
+    }
+
+    func testAnswerPermissionRequestSubmitsDenyResponse() async throws {
+        let store = SessionStore.shared
+        let sessionId = "permission-request-deny-\(UUID().uuidString)"
+        let requestId = HookInteractionRequest.id(
+            provider: .claude,
+            rawSessionId: sessionId,
+            hookEventName: NormalizedAgentEvent.permissionRequest.rawValue,
+            toolUseId: "permission-\(UUID().uuidString)"
+        )
+        let session = store.process(makeEvent(
+            sessionId: sessionId,
+            event: .permissionRequest,
+            status: "waiting_for_input",
+            tool: "Bash",
+            toolInput: [
+                "command": AnyCodable("rm -rf node_modules"),
+            ],
+            interactionRequestId: requestId
+        ))
+        let responseTask = Task.detached {
+            HookInteractionResponseBroker.shared.waitForResponse(
+                requestId: requestId,
+                timeout: 1
+            )
+        }
+        let responseWaiterRegistered = await waitUntil(timeout: 1) {
+            HookInteractionResponseBroker.shared.isWaitingForResponse(requestId: requestId)
+        }
+        XCTAssertTrue(responseWaiterRegistered)
+
+        XCTAssertTrue(store.answerPendingQuestions(
+            in: session.sessionKey,
+            selectedOptionIndexesByQuestion: [0: 1]
+        ))
+
+        let awaitedResponseData = await responseTask.value
+        let responseData = try XCTUnwrap(awaitedResponseData)
+        let response = try XCTUnwrap(JSONSerialization.jsonObject(with: responseData) as? [String: Any])
+        let hookOutput = try XCTUnwrap(response["hookSpecificOutput"] as? [String: Any])
+        let decision = try XCTUnwrap(hookOutput["decision"] as? [String: Any])
+
+        XCTAssertEqual(decision["behavior"] as? String, "deny")
+        XCTAssertEqual(decision["message"] as? String, "User denied this action.")
+        XCTAssertEqual(decision["interrupt"] as? Bool, false)
+        XCTAssertTrue(session.pendingQuestions.isEmpty)
+    }
+
+    func testCancelPendingPermissionRequestSubmitsDenyResponse() async throws {
+        let store = SessionStore.shared
+        let sessionId = "permission-request-cancel-\(UUID().uuidString)"
+        let requestId = HookInteractionRequest.id(
+            provider: .claude,
+            rawSessionId: sessionId,
+            hookEventName: NormalizedAgentEvent.permissionRequest.rawValue,
+            toolUseId: "permission-\(UUID().uuidString)"
+        )
+        let session = store.process(makeEvent(
+            sessionId: sessionId,
+            event: .permissionRequest,
+            status: "waiting_for_input",
+            tool: "Bash",
+            toolInput: [
+                "command": AnyCodable("npm test"),
+            ],
+            interactionRequestId: requestId
+        ))
+        let responseTask = Task.detached {
+            HookInteractionResponseBroker.shared.waitForResponse(
+                requestId: requestId,
+                timeout: 1
+            )
+        }
+        let responseWaiterRegistered = await waitUntil(timeout: 1) {
+            HookInteractionResponseBroker.shared.isWaitingForResponse(requestId: requestId)
+        }
+        XCTAssertTrue(responseWaiterRegistered)
+
+        XCTAssertTrue(store.cancelPendingQuestion(in: session.sessionKey))
+
+        let awaitedResponseData = await responseTask.value
+        let responseData = try XCTUnwrap(awaitedResponseData)
+        let response = try XCTUnwrap(JSONSerialization.jsonObject(with: responseData) as? [String: Any])
+        let hookOutput = try XCTUnwrap(response["hookSpecificOutput"] as? [String: Any])
+        let decision = try XCTUnwrap(hookOutput["decision"] as? [String: Any])
+
+        XCTAssertEqual(decision["behavior"] as? String, "deny")
+        XCTAssertEqual(decision["message"] as? String, "User denied this action.")
+        XCTAssertEqual(decision["interrupt"] as? Bool, false)
+        XCTAssertTrue(session.pendingQuestions.isEmpty)
+        XCTAssertEqual(session.task, .working)
+    }
+
+    func testRememberedPermissionResponseRequiresPermissionSuggestion() {
+        XCTAssertNil(HookInteractionResponse.makePermissionRequestResponse(
+            decision: .allowAndRemember,
+            hookEventName: NormalizedAgentEvent.permissionRequest.rawValue,
+            toolInput: nil,
+            permissionSuggestions: nil
+        ))
+    }
+
     func testAskUserQuestionPermissionRequestResponseUsesDecisionShapeAndPreservesNulls() throws {
         let responseData = try XCTUnwrap(HookInteractionResponse.makeAskUserQuestionResponse(
             hookEventName: NormalizedAgentEvent.permissionRequest.rawValue,
@@ -543,6 +761,26 @@ final class SessionStoreTests: XCTestCase {
         let envelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: data)
 
         XCTAssertNil(HookInteractionRequest.id(for: envelope))
+    }
+
+    func testPermissionRequestInteractionIdDoesNotRequireToolUseId() throws {
+        let payload: [String: Any] = [
+            "provider": "claude",
+            "session_id": "permission-request-id",
+            "cwd": "/tmp",
+            "event": "PermissionRequest",
+            "status": "waiting_for_input",
+            "tool": "Bash",
+            "tool_input": [
+                "command": "npm test",
+            ],
+        ]
+        let data = try JSONSerialization.data(withJSONObject: payload)
+        let envelope = try JSONDecoder().decode(AgentHookEnvelope.self, from: data)
+
+        let requestId = try XCTUnwrap(HookInteractionRequest.id(for: envelope))
+
+        XCTAssertTrue(requestId.hasPrefix("claude:permission-request-id:PermissionRequest:"))
     }
 
     func testDisplaySessionNumbersRenumberAfterDismissal() {
@@ -938,6 +1176,7 @@ final class SessionStoreTests: XCTestCase {
         tool: String? = nil,
         toolUseId: String? = nil,
         toolInput: [String: AnyCodable]? = nil,
+        permissionSuggestions: [AnyCodable]? = nil,
         interactionRequestId: String? = nil
     ) -> HookEvent {
         HookEvent(
@@ -953,6 +1192,7 @@ final class SessionStoreTests: XCTestCase {
             userPrompt: userPrompt,
             userPromptHasAttachments: userPromptHasAttachments,
             permissionMode: nil,
+            permissionSuggestions: permissionSuggestions,
             interactive: true,
             interactionRequestId: interactionRequestId
         )

@@ -418,7 +418,14 @@ final class SessionData: Identifiable {
 }
 
 nonisolated struct PendingQuestionResponseContext: Sendable {
+    enum Kind: Sendable {
+        case askUserQuestion
+        case permissionRequest
+    }
+
     let requestId: String
     let hookEventName: String
     let toolInput: [String: AnyCodable]?
+    let permissionSuggestions: [AnyCodable]?
+    let kind: Kind
 }

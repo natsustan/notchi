@@ -46,6 +46,7 @@ struct AgentHookEnvelope: Decodable, Sendable {
     let toolUseId: String?
     let userPrompt: String?
     let permissionMode: String?
+    let permissionSuggestions: [AnyCodable]?
     let interactive: Bool?
     let claudeProcessId: Int?
     let codexProcessId: Int?
@@ -61,6 +62,7 @@ struct AgentHookEnvelope: Decodable, Sendable {
         case toolUseId = "tool_use_id"
         case userPrompt = "user_prompt"
         case permissionMode = "permission_mode"
+        case permissionSuggestions = "permission_suggestions"
         case interactive
         case claudeProcessId = "claude_process_id"
         case codexProcessId = "codex_process_id"
@@ -82,6 +84,7 @@ struct AgentHookEnvelope: Decodable, Sendable {
         toolUseId = try container.decodeIfPresent(String.self, forKey: .toolUseId)
         userPrompt = try container.decodeIfPresent(String.self, forKey: .userPrompt)
         permissionMode = try container.decodeIfPresent(String.self, forKey: .permissionMode)
+        permissionSuggestions = try container.decodeIfPresent([AnyCodable].self, forKey: .permissionSuggestions)
         interactive = try container.decodeIfPresent(Bool.self, forKey: .interactive)
         claudeProcessId = try container.decodeIfPresent(Int.self, forKey: .claudeProcessId)
         codexProcessId = try container.decodeIfPresent(Int.self, forKey: .codexProcessId)
@@ -103,6 +106,7 @@ struct HookEvent: Sendable {
     let userPrompt: String?
     let userPromptHasAttachments: Bool
     let permissionMode: String?
+    let permissionSuggestions: [AnyCodable]?
     let interactive: Bool?
     let claudeProcessId: Int?
     let codexProcessId: Int?
@@ -130,6 +134,7 @@ struct HookEvent: Sendable {
         userPrompt: String? = nil,
         userPromptHasAttachments: Bool = false,
         permissionMode: String? = nil,
+        permissionSuggestions: [AnyCodable]? = nil,
         interactive: Bool? = nil,
         claudeProcessId: Int? = nil,
         codexProcessId: Int? = nil,
@@ -148,6 +153,7 @@ struct HookEvent: Sendable {
         self.userPrompt = userPrompt
         self.userPromptHasAttachments = userPromptHasAttachments
         self.permissionMode = permissionMode
+        self.permissionSuggestions = permissionSuggestions
         self.interactive = interactive
         self.claudeProcessId = claudeProcessId
         self.codexProcessId = codexProcessId
