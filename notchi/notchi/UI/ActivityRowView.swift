@@ -166,6 +166,8 @@ private struct InlineAnswerTextField: NSViewRepresentable {
 
 struct QuestionPromptView: View {
     let questions: [PendingQuestion]
+    let provider: AgentProvider
+    let responseHint: String?
     let onSubmitAnswers: (([Int: Int], [Int: String]) -> Bool)?
     @State private var currentIndex = 0
     @State private var selectedOptionIndexesByQuestion: [Int: Int] = [:]
@@ -175,12 +177,17 @@ struct QuestionPromptView: View {
     @State private var pressedOptionIndex: Int?
     @State private var isSubmitting = false
     @State private var focusedFreeTextQuestionIndex: Int?
+    @State private var responseHintShakePhase: CGFloat = 0
 
     init(
         questions: [PendingQuestion],
+        provider: AgentProvider = .claude,
+        responseHint: String? = nil,
         onSubmitAnswers: (([Int: Int], [Int: String]) -> Bool)? = nil
     ) {
         self.questions = questions
+        self.provider = provider
+        self.responseHint = responseHint
         self.onSubmitAnswers = onSubmitAnswers
     }
 
@@ -203,6 +210,13 @@ struct QuestionPromptView: View {
             questionText
                 .padding(.bottom, 6)
             optionsList
+            if let responseHint {
+                Text(responseHint)
+                    .font(.system(size: 10, weight: .medium).italic())
+                    .foregroundColor(TerminalColors.secondaryText)
+                    .padding(.top, 7)
+                    .modifier(QuestionHintShake(animatableData: responseHintShakePhase))
+            }
         }
         .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -210,7 +224,7 @@ struct QuestionPromptView: View {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(TerminalColors.claudeOrange.opacity(0.3), lineWidth: 1)
+                .stroke(accentColor.opacity(0.3), lineWidth: 1)
         )
         .padding(.vertical, 4)
         .onChange(of: questions.map(\.question)) {
@@ -227,7 +241,7 @@ struct QuestionPromptView: View {
             if let header = current.header {
                 Text(header)
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(TerminalColors.claudeOrange)
+                    .foregroundColor(accentColor)
                     .textCase(.uppercase)
                     .tracking(0.5)
             }
@@ -311,8 +325,21 @@ struct QuestionPromptView: View {
                         }
                         .simultaneousGesture(pressGesture(for: index))
                     }
+                } else if shouldRenderDisplayOnlyRowsHighlighted {
+                    highlightedOptionRow(
+                        index: index,
+                        option: option,
+                        isPressed: pressedOptionIndex == index
+                    )
+                    .onTapGesture {
+                        wiggleResponseHint()
+                    }
+                    .simultaneousGesture(pressGesture(for: index))
                 } else {
                     optionRow(index: index, option: option)
+                        .onTapGesture {
+                            wiggleResponseHint()
+                        }
                 }
             }
         }
@@ -510,11 +537,11 @@ struct QuestionPromptView: View {
         }
 
         return (
-            rowFill: TerminalColors.claudeOrange.opacity(rowFillOpacity),
-            badgeFill: TerminalColors.claudeOrangeDeep.opacity(badgeFillOpacity),
-            stroke: TerminalColors.claudeOrange.opacity(strokeOpacity),
+            rowFill: accentColor.opacity(rowFillOpacity),
+            badgeFill: deepAccentColor.opacity(badgeFillOpacity),
+            stroke: accentColor.opacity(strokeOpacity),
             strokeWidth: strokeWidth,
-            shadowColor: TerminalColors.claudeOrange.opacity(shadowOpacity),
+            shadowColor: accentColor.opacity(shadowOpacity),
             shadowRadius: shadowRadius,
             shadowYOffset: shadowYOffset
         )
@@ -544,6 +571,9 @@ struct QuestionPromptView: View {
         guard !isSubmitting,
               let onSubmitAnswers,
               current.options.indices.contains(optionIndex) else {
+            if onSubmitAnswers == nil, current.options.indices.contains(optionIndex) {
+                wiggleResponseHint()
+            }
             return
         }
 
@@ -628,6 +658,13 @@ struct QuestionPromptView: View {
         }
     }
 
+    private func wiggleResponseHint() {
+        guard responseHint != nil else { return }
+        withAnimation(.easeInOut(duration: 0.28)) {
+            responseHintShakePhase += 1
+        }
+    }
+
     private func showQuestion(at index: Int) {
         currentIndex = min(max(0, index), questions.count - 1)
         hoveredOptionIndex = nil
@@ -667,7 +704,7 @@ struct QuestionPromptView: View {
         HStack(alignment: .top, spacing: 6) {
             Text("\(index + 1).")
                 .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                .foregroundColor(TerminalColors.claudeOrange)
+                .foregroundColor(accentColor)
                 .frame(width: 16, alignment: .trailing)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -683,6 +720,33 @@ struct QuestionPromptView: View {
             }
         }
         .contentShape(Rectangle())
+    }
+
+    private var accentColor: Color {
+        provider.accentColor
+    }
+
+    private var deepAccentColor: Color {
+        provider.deepAccentColor
+    }
+
+    private var shouldRenderDisplayOnlyRowsHighlighted: Bool {
+        provider == .codex
+    }
+}
+
+private struct QuestionHintShake: GeometryEffect {
+    var travelDistance: CGFloat = 4
+    var cyclesPerUnit: CGFloat = 1.5
+    var animatableData: CGFloat
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(
+            CGAffineTransform(
+                translationX: travelDistance * sin(animatableData * .pi * 2 * cyclesPerUnit),
+                y: 0
+            )
+        )
     }
 }
 

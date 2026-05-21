@@ -474,6 +474,11 @@ struct ExpandedPanelView: View {
             && activeSessions.contains { $0.provider == .codex }
     }
 
+    static func questionResponseHint(for session: SessionData?) -> String? {
+        guard session?.provider == .codex else { return nil }
+        return "Reply directly in the Codex app or CLI"
+    }
+
     static func sharedUsageResetLabelPrefix(
         state: SharedUsageBarState?,
         activeSessions: [SessionData]
@@ -579,15 +584,23 @@ struct ExpandedPanelView: View {
 
                                 let questions = effectiveSession?.pendingQuestions ?? []
                                 if !questions.isEmpty {
-                                    QuestionPromptView(questions: questions) { selectedOptionIndexesByQuestion, customAnswersByQuestion in
-                                        guard let sessionKey = effectiveSession?.sessionKey else { return false }
-                                        return sessionStore.answerPendingQuestions(
-                                            in: sessionKey,
-                                            selectedOptionIndexesByQuestion: selectedOptionIndexesByQuestion,
-                                            customAnswersByQuestion: customAnswersByQuestion
-                                        )
-                                    }
-                                        .id("question-prompt")
+                                    let questionProvider = effectiveSession?.provider ?? .claude
+                                    let submitAnswers: (([Int: Int], [Int: String]) -> Bool)? =
+                                        effectiveSession?.pendingQuestionResponseContext == nil ? nil : { selectedOptionIndexesByQuestion, customAnswersByQuestion in
+                                            guard let sessionKey = effectiveSession?.sessionKey else { return false }
+                                            return sessionStore.answerPendingQuestions(
+                                                in: sessionKey,
+                                                selectedOptionIndexesByQuestion: selectedOptionIndexesByQuestion,
+                                                customAnswersByQuestion: customAnswersByQuestion
+                                            )
+                                        }
+                                    QuestionPromptView(
+                                        questions: questions,
+                                        provider: questionProvider,
+                                        responseHint: Self.questionResponseHint(for: effectiveSession),
+                                        onSubmitAnswers: submitAnswers
+                                    )
+                                    .id("question-prompt")
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)

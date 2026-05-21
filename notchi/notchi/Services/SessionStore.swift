@@ -143,6 +143,7 @@ final class SessionStore {
                 )
             } else {
                 let question = Self.buildPermissionQuestion(
+                    provider: event.provider,
                     tool: event.tool,
                     toolInput: event.toolInput,
                     permissionSuggestions: event.permissionSuggestions
@@ -595,13 +596,14 @@ final class SessionStore {
     }
 
     private static func buildPermissionQuestion(
+        provider: AgentProvider,
         tool: String?,
         toolInput: [String: AnyCodable]?,
         permissionSuggestions: [AnyCodable]?
     ) -> PendingQuestion {
         let toolName = tool ?? "Tool"
         let input = toolInput?.mapValues { $0.value }
-        let description = SessionEvent.deriveDescription(tool: tool, toolInput: input)
+        let description = Self.permissionQuestionText(provider: provider, tool: tool, toolInput: input)
         var options: [(label: String, description: String?)] = [
             (label: PermissionRequestDecision.allowOnceLabel, description: nil),
         ]
@@ -615,6 +617,20 @@ final class SessionStore {
             header: "Permission Request",
             options: options
         )
+    }
+
+    private static func permissionQuestionText(
+        provider: AgentProvider,
+        tool: String?,
+        toolInput: [String: Any]?
+    ) -> String? {
+        if provider == .codex,
+           let justification = toolInput?["justification"] as? String,
+           !justification.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return justification
+        }
+
+        return SessionEvent.deriveDescription(tool: tool, toolInput: toolInput)
     }
 
     private static func isProcessingStatus(_ status: String) -> Bool {

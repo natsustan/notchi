@@ -475,6 +475,28 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(session.task, .idle)
     }
 
+    func testCodexPermissionRequestUsesJustificationAsQuestionText() {
+        let store = SessionStore.shared
+        let session = store.process(makeEvent(
+            sessionId: "codex-permission-question-\(UUID().uuidString)",
+            provider: .codex,
+            event: .permissionRequest,
+            status: "waiting_for_input",
+            tool: "Bash",
+            toolInput: [
+                "command": AnyCodable("psd"),
+                "justification": AnyCodable("Do you want to allow a permission-request test command for `psd` in the current workspace?"),
+            ]
+        ))
+
+        XCTAssertEqual(
+            session.pendingQuestions.first?.question,
+            "Do you want to allow a permission-request test command for `psd` in the current workspace?"
+        )
+        XCTAssertEqual(session.pendingQuestions.first?.options.map(\.label), ["Yes", "No"])
+        XCTAssertNil(session.pendingQuestionResponseContext)
+    }
+
     func testAnswerPermissionRequestSubmitsAllowResponse() async throws {
         let store = SessionStore.shared
         let sessionId = "permission-request-allow-\(UUID().uuidString)"

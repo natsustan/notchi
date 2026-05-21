@@ -124,6 +124,17 @@ final class ExpandedPanelViewTests: XCTestCase {
         XCTAssertFalse(ExpandedPanelView.hasMixedClaudeAndCodexSessions([codex]))
     }
 
+    func testCodexQuestionPromptShowsDirectReplyHint() {
+        let claude = SessionData(sessionId: "claude-question-session", provider: .claude, cwd: "/tmp/project")
+        let codex = SessionData(sessionId: "codex-question-session", provider: .codex, cwd: "/tmp/project")
+
+        XCTAssertNil(ExpandedPanelView.questionResponseHint(for: claude))
+        XCTAssertEqual(
+            ExpandedPanelView.questionResponseHint(for: codex),
+            "Reply directly in the Codex app or CLI"
+        )
+    }
+
     func testMixedProviderSessionsUseSelectedProviderResetLabelPrefix() {
         let claudeSession = SessionData(sessionId: "claude-session", provider: .claude, cwd: "/tmp/project")
         let codexSession = SessionData(sessionId: "codex-session", provider: .codex, cwd: "/tmp/project")
