@@ -177,6 +177,7 @@ struct QuestionPromptView: View {
     @State private var pressedOptionIndex: Int?
     @State private var isSubmitting = false
     @State private var focusedFreeTextQuestionIndex: Int?
+    @State private var responseHintShakePhase: CGFloat = 0
 
     init(
         questions: [PendingQuestion],
@@ -214,6 +215,7 @@ struct QuestionPromptView: View {
                     .font(.system(size: 10, weight: .medium).italic())
                     .foregroundColor(TerminalColors.secondaryText)
                     .padding(.top, 7)
+                    .modifier(QuestionHintShake(animatableData: responseHintShakePhase))
             }
         }
         .padding(10)
@@ -324,9 +326,20 @@ struct QuestionPromptView: View {
                         .simultaneousGesture(pressGesture(for: index))
                     }
                 } else if shouldRenderDisplayOnlyRowsHighlighted {
-                    highlightedOptionRow(index: index, option: option)
+                    highlightedOptionRow(
+                        index: index,
+                        option: option,
+                        isPressed: pressedOptionIndex == index
+                    )
+                    .onTapGesture {
+                        wiggleResponseHint()
+                    }
+                    .simultaneousGesture(pressGesture(for: index))
                 } else {
                     optionRow(index: index, option: option)
+                        .onTapGesture {
+                            wiggleResponseHint()
+                        }
                 }
             }
         }
@@ -558,6 +571,9 @@ struct QuestionPromptView: View {
         guard !isSubmitting,
               let onSubmitAnswers,
               current.options.indices.contains(optionIndex) else {
+            if onSubmitAnswers == nil, current.options.indices.contains(optionIndex) {
+                wiggleResponseHint()
+            }
             return
         }
 
@@ -642,6 +658,13 @@ struct QuestionPromptView: View {
         }
     }
 
+    private func wiggleResponseHint() {
+        guard responseHint != nil else { return }
+        withAnimation(.easeInOut(duration: 0.28)) {
+            responseHintShakePhase += 1
+        }
+    }
+
     private func showQuestion(at index: Int) {
         currentIndex = min(max(0, index), questions.count - 1)
         hoveredOptionIndex = nil
@@ -709,6 +732,21 @@ struct QuestionPromptView: View {
 
     private var shouldRenderDisplayOnlyRowsHighlighted: Bool {
         provider == .codex
+    }
+}
+
+private struct QuestionHintShake: GeometryEffect {
+    var travelDistance: CGFloat = 4
+    var cyclesPerUnit: CGFloat = 1.5
+    var animatableData: CGFloat
+
+    func effectValue(size: CGSize) -> ProjectionTransform {
+        ProjectionTransform(
+            CGAffineTransform(
+                translationX: travelDistance * sin(animatableData * .pi * 2 * cyclesPerUnit),
+                y: 0
+            )
+        )
     }
 }
 
