@@ -1,4 +1,5 @@
 import AppKit
+import Carbon.HIToolbox
 
 /// A borderless, transparent panel positioned at the MacBook notch area
 final class NotchPanel: NSPanel {
@@ -25,6 +26,7 @@ final class NotchPanel: NSPanel {
         backgroundColor = .clear
         hasShadow = false
         isMovable = false
+        isExcludedFromWindowsMenu = true
 
         // Hit testing is handled by NotchHitTestView (the content view wrapper)
         // which selectively passes through events based on notch/panel rect
@@ -32,6 +34,10 @@ final class NotchPanel: NSPanel {
 
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
+
+    override func miniaturize(_ sender: Any?) {}
+
+    override func performMiniaturize(_ sender: Any?) {}
 
     override func sendEvent(_ event: NSEvent) {
         if event.type == .leftMouseDown, !isKeyWindow {
@@ -41,7 +47,7 @@ final class NotchPanel: NSPanel {
     }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 {
+        if event.keyCode == UInt16(kVK_Escape) {
             NotificationCenter.default.post(name: .notchiShouldCollapse, object: nil)
             return
         }
@@ -59,5 +65,11 @@ final class NotchPanel: NSPanel {
         }
 
         super.keyDown(with: event)
+    }
+
+    nonisolated static func isMiniaturizeShortcut(_ event: NSEvent) -> Bool {
+        guard event.keyCode == UInt16(kVK_ANSI_M) else { return false }
+        let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
+        return modifiers == [.command] || modifiers == [.command, .option]
     }
 }
