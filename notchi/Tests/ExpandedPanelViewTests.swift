@@ -3,7 +3,7 @@ import XCTest
 
 @MainActor
 final class ExpandedPanelViewTests: XCTestCase {
-    func testSharedUsageBarStaysVisibleWhenCodexSessionIsSelectedAndClaudeIsAlsoActive() {
+    func testSharedUsageBarStaysVisibleWithActiveSessionsOrNoContextSession() {
         let claude = SessionData(sessionId: "claude-session", provider: .claude, cwd: "/tmp/project")
         let codex = SessionData(sessionId: "codex-session", provider: .codex, cwd: "/tmp/project")
 
@@ -13,23 +13,26 @@ final class ExpandedPanelViewTests: XCTestCase {
                 activeSessions: [codex, claude]
             )
         )
-    }
-
-    func testSharedUsageBarStaysVisibleWhenOnlyCodexSessionsAreActive() {
-        let codex = SessionData(sessionId: "codex-session", provider: .codex, cwd: "/tmp/project")
-
         XCTAssertTrue(
             ExpandedPanelView.shouldShowSharedUsageBar(
                 contextSession: codex,
                 activeSessions: [codex]
             )
         )
-    }
-
-    func testSharedUsageBarStaysVisibleWhenNoEffectiveSessionExistsYet() {
         XCTAssertTrue(
             ExpandedPanelView.shouldShowSharedUsageBar(
                 contextSession: nil,
+                activeSessions: []
+            )
+        )
+    }
+
+    func testSharedUsageBarHidesWhenContextSessionLingersWithoutActiveSessions() {
+        let codex = SessionData(sessionId: "codex-session", provider: .codex, cwd: "/tmp/project")
+
+        XCTAssertFalse(
+            ExpandedPanelView.shouldShowSharedUsageBar(
+                contextSession: codex,
                 activeSessions: []
             )
         )
