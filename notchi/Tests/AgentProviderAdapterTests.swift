@@ -1,3 +1,4 @@
+import Foundation
 import XCTest
 @testable import notchi
 
@@ -33,6 +34,36 @@ final class AgentProviderAdapterTests: XCTestCase {
 
     func testCodexProviderCapabilitiesIncludePromptEmotionAnalysis() {
         XCTAssertTrue(AgentProvider.codex.capabilities.supportsPromptEmotionAnalysis)
+    }
+
+    @MainActor
+    func testIntegrationCoordinatorDeliversCodexEventsInReceivedOrder() async throws {
+        CodexProviderAdapter.resetTranscriptBackedSessionTrackingForTests()
+        defer { CodexProviderAdapter.resetTranscriptBackedSessionTrackingForTests() }
+
+        let eventSource = TestAgentHookEventSource()
+        let coordinator = IntegrationCoordinator(
+            eventSource: eventSource,
+            adapters: [CodexProviderAdapter()]
+        )
+        defer { coordinator.stop() }
+
+        var deliveredPrompts: [String] = []
+        let deliveredAllEvents = expectation(description: "Delivered all Codex events")
+        deliveredAllEvents.expectedFulfillmentCount = 3
+
+        coordinator.start { event in
+            deliveredPrompts.append(event.userPrompt ?? "")
+            deliveredAllEvents.fulfill()
+        }
+
+        try eventSource.emit(codexEnvelope(prompt: "one"))
+        try eventSource.emit(codexEnvelope(prompt: "two"))
+        try eventSource.emit(codexEnvelope(prompt: "three"))
+
+        await fulfillment(of: [deliveredAllEvents], timeout: 1)
+
+        XCTAssertEqual(deliveredPrompts, ["one", "two", "three"])
     }
 
     func testClaudeAdapterNormalizesEnvelopeIntoHookEvent() throws {
@@ -295,7 +326,7 @@ final class AgentProviderAdapterTests: XCTestCase {
 
     func testIntegrationCoordinatorReportsProviderAvailabilityFromAdapters() {
         let coordinator = IntegrationCoordinator(
-            socketServer: SocketServer(socketPath: "/tmp/notchi-test-\(UUID().uuidString).sock"),
+            eventSource: SocketServer(socketPath: "/tmp/notchi-test-\(UUID().uuidString).sock"),
             adapters: [
                 TestProviderAdapter(provider: .claude, available: false, installed: false),
                 TestProviderAdapter(provider: .codex, available: true, installed: false),
@@ -308,7 +339,7 @@ final class AgentProviderAdapterTests: XCTestCase {
 
     func testIntegrationCoordinatorDistinguishesProviderUnavailableFromInstallFailure() {
         let coordinator = IntegrationCoordinator(
-            socketServer: SocketServer(socketPath: "/tmp/notchi-test-\(UUID().uuidString).sock"),
+            eventSource: SocketServer(socketPath: "/tmp/notchi-test-\(UUID().uuidString).sock"),
             adapters: [
                 TestProviderAdapter(
                     provider: .claude,
@@ -328,5 +359,53 @@ final class AgentProviderAdapterTests: XCTestCase {
         XCTAssertEqual(coordinator.installHooksIfNeededStatus(for: .claude), .providerUnavailable)
         XCTAssertEqual(coordinator.installStatus(for: .codex), .notInstalled)
         XCTAssertEqual(coordinator.installHooksIfNeededStatus(for: .codex), .failed)
+    }
+
+    private func codexEnvelope(prompt: String) throws -> AgentHookEnvelope {
+        let data = try JSONSerialization.data(withJSONObject: [
+            "provider": "codex",
+            "session_id": "ordered-codex-session",
+            "cwd": "/tmp",
+            "event": "UserPromptSubmit",
+            "status": "processing",
+            "transcript_path": "/tmp/ordered-codex-rollout.jsonl",
+            "user_prompt": prompt,
+        ])
+        return try JSONDecoder().decode(AgentHookEnvelope.self, from: data)
+    }
+}
+
+private enum TestAgentHookEventSourceError: Error {
+    case missingHandler
+}
+
+private final class TestAgentHookEventSource: AgentHookEventSource, @unchecked Sendable {
+    private let lock = NSLock()
+    private var handler: AgentHookEnvelopeHandler?
+
+    nonisolated func start(onEvent: @escaping AgentHookEnvelopeHandler) {
+        lock.lock()
+        handler = onEvent
+        lock.unlock()
+    }
+
+    nonisolated func stop() {
+        lock.lock()
+        handler = nil
+        lock.unlock()
+    }
+
+    nonisolated func emit(_ envelope: AgentHookEnvelope) throws {
+        lock.lock()
+        let currentHandler = handler
+        lock.unlock()
+
+        guard let currentHandler else {
+            throw TestAgentHookEventSourceError.missingHandler
+        }
+
+        // Keep this helper for non-interactive events; interaction requests block
+        // the handler while waiting for a response.
+        _ = currentHandler(envelope)
     }
 }
