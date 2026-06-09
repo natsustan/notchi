@@ -57,6 +57,7 @@ struct PanelSettingsView: View {
     @Binding private var showingEmotionAnalysisSettings: Bool
     private let sessionStore: SessionStore
     @AppStorage(AppSettings.hideSpriteWhenIdleKey) private var hideSpriteWhenIdle = false
+    @State private var panelToggleShortcut = AppSettings.panelToggleShortcut
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @State private var claudeHooksStatus = IntegrationCoordinator.shared.installStatus(for: .claude)
     @State private var codexHooksStatus = IntegrationCoordinator.shared.installStatus(for: .codex)
@@ -94,7 +95,10 @@ struct PanelSettingsView: View {
         .padding(.horizontal, SettingsLayout.panelHorizontalPadding)
         .padding(.top, SettingsLayout.topPadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .onAppear(perform: refreshHookStatuses)
+        .onAppear {
+            refreshHookStatuses()
+            panelToggleShortcut = AppSettings.panelToggleShortcut
+        }
     }
 
     private var mainSettings: some View {
@@ -122,6 +126,16 @@ struct PanelSettingsView: View {
             ScreenPickerRow(screenSelector: ScreenSelector.shared)
 
             SoundPickerView()
+
+            SettingsRowView(icon: "keyboard", title: "Toggle Panel") {
+                ShortcutRecorderView(
+                    shortcut: panelToggleShortcut,
+                    onBeginRecording: beginPanelShortcutRecording,
+                    onCancelRecording: endPanelShortcutRecording,
+                    onReset: resetPanelToggleShortcut,
+                    onShortcutChange: updatePanelToggleShortcut
+                )
+            }
 
             Button(action: toggleLaunchAtLogin) {
                 SettingsRowView(icon: "power", title: "Launch at Login") {
@@ -286,6 +300,24 @@ struct PanelSettingsView: View {
 
     private func toggleHideSpriteWhenIdle() {
         hideSpriteWhenIdle.toggle()
+    }
+
+    private func beginPanelShortcutRecording() {
+        GlobalShortcutService.shared.suspendShortcut()
+    }
+
+    private func endPanelShortcutRecording() {
+        GlobalShortcutService.shared.reloadShortcut()
+    }
+
+    private func updatePanelToggleShortcut(_ shortcut: GlobalShortcut) {
+        panelToggleShortcut = shortcut
+        AppSettings.panelToggleShortcut = shortcut
+        GlobalShortcutService.shared.reloadShortcut()
+    }
+
+    private func resetPanelToggleShortcut() {
+        updatePanelToggleShortcut(.defaultTogglePanel)
     }
 
     private func toggleHooksExpanded() {

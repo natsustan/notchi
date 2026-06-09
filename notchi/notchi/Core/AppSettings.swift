@@ -88,6 +88,7 @@ enum EmotionAnalysisModel: String, CaseIterable, Identifiable {
 
 struct AppSettings {
     static let hideSpriteWhenIdleKey = "hideSpriteWhenIdle"
+    static let panelToggleShortcutKey = "panelToggleShortcut"
 
     private static let notificationSoundKey = "notificationSound"
     private static let notificationSoundSelectionKey = "notificationSoundSelection"
@@ -111,6 +112,19 @@ struct AppSettings {
     static var hideSpriteWhenIdle: Bool {
         get { UserDefaults.standard.bool(forKey: hideSpriteWhenIdleKey) }
         set { UserDefaults.standard.set(newValue, forKey: hideSpriteWhenIdleKey) }
+    }
+
+    static var panelToggleShortcut: GlobalShortcut {
+        get {
+            guard let rawValue = UserDefaults.standard.string(forKey: panelToggleShortcutKey),
+                  let shortcut = GlobalShortcut(rawValue: rawValue) else {
+                return .defaultTogglePanel
+            }
+            return shortcut
+        }
+        set {
+            UserDefaults.standard.set(newValue.rawValue, forKey: panelToggleShortcutKey)
+        }
     }
 
     static var lastUsedAgentProvider: AgentProvider {

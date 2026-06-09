@@ -10,6 +10,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
     private var notchPanel: NotchPanel?
     private let windowHeight: CGFloat = 500
     private let integrationCoordinator = IntegrationCoordinator.shared
+    private let globalShortcutService = GlobalShortcutService.shared
 
     private var updaterStarted = false
     private var temporarilyRegularForUpdateSession = false
@@ -41,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
         NSApplication.shared.setActivationPolicy(.accessory)
         integrationCoordinator.prepareForLaunch()
         setupNotchWindow()
+        globalShortcutService.start()
         observeScreenChanges()
         observeWakeNotifications()
         startHookServices()
@@ -60,6 +62,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        globalShortcutService.stop()
         integrationCoordinator.stop()
         ClaudeUsageService.shared.stopPolling()
     }
