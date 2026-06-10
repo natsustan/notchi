@@ -204,6 +204,33 @@ final class ClaudeCLIResolverTests: XCTestCase {
         XCTAssertEqual(processCalls.first?.1, ["--version"])
     }
 
+    func testLiveUserAgentResolutionRunsOffMainThread() async {
+        final class ThreadRecorder: @unchecked Sendable {
+            var sawMainThread: Bool?
+        }
+
+        ClaudeConfigDirectoryResolver.testHooks = .init(
+            environment: { ["CLAUDE_CONFIG_DIR": "/tmp/claude-config"] },
+            isExecutableFile: { _ in false },
+            runProcess: { _, _, _ in nil }
+        )
+
+        let recorder = ThreadRecorder()
+        ClaudeCLIResolver.testHooks = .init(
+            environment: {
+                recorder.sawMainThread = Thread.isMainThread
+                return [:]
+            },
+            isExecutableFile: { _ in false },
+            runProcess: { _, _, _ in nil }
+        )
+
+        let userAgent = await ClaudeUsageServiceDependencies.live.resolveUserAgent()
+
+        XCTAssertNil(userAgent)
+        XCTAssertEqual(recorder.sawMainThread, false)
+    }
+
     func testShellResolverUsesLoginShellResultWithoutInteractiveFallback() {
         var processCalls: [[String]] = []
         ClaudeCLIResolver.testHooks = .init(

@@ -32,6 +32,29 @@ extension ClaudeUsageServiceTests {
         XCTAssertEqual(scheduler.intervals, [60])
     }
 
+    func testUserAgentIsResolvedOnceAndCachedAcrossFetches() async throws {
+        let scheduler = PollSchedulerSpy()
+        var resolveCalls = 0
+        let dependencies = makeDependencies(
+            scheduler: scheduler,
+            resolveUserAgent: {
+                resolveCalls += 1
+                return "claude-code/2.1.77"
+            },
+            fetchUsage: { request in
+                XCTAssertEqual(request.value(forHTTPHeaderField: "User-Agent"), "claude-code/2.1.77")
+                return (self.makeSuccessPayload(utilization: 42), self.makeResponse(statusCode: 200))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+        await service.performFetch(with: "token")
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(resolveCalls, 1)
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 42)
+    }
+
     func testStartPollingDuringActiveHeadersFallbackDoesNotSendOAuthImmediately() async throws {
         let now = Date(timeIntervalSince1970: 100)
         let recorder = RequestRecorder()
