@@ -31,6 +31,8 @@ final class EmotionState {
 
     init() {}
 
+    nonisolated deinit {}
+
     func recordEmotion(_ rawEmotion: String, intensity: Double, prompt _: String) {
         let emotion = NotchiEmotion(rawValue: rawEmotion)
 

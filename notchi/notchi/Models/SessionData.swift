@@ -53,9 +53,7 @@ final class SessionData: Identifiable {
     private(set) var codexArchived: Bool = false
     private(set) var codexCompactionSignal: CodexCompactionSignal?
 
-    private var durationTimer: Task<Void, Never>?
     private var sleepTimer: Task<Void, Never>?
-    private(set) var formattedDuration: String = "0m 00s"
 
     private static let maxEvents = 20
     private static let maxAssistantMessages = 10
@@ -127,9 +125,9 @@ final class SessionData: Identifiable {
         let hash = UInt(bitPattern: sessionKey.stableId.hashValue)
         self.spriteXPosition = Self.resolveXPosition(hash: hash, existingPositions: existingXPositions)
         self.spriteYOffset = Self.resolveYOffset(hash: hash)
-
-        startDurationTimer()
     }
+
+    nonisolated deinit {}
 
     convenience init(
         sessionId: String,
@@ -387,8 +385,6 @@ final class SessionData: Identifiable {
     }
 
     func endSession() {
-        durationTimer?.cancel()
-        durationTimer = nil
         sleepTimer?.cancel()
         sleepTimer = nil
         isProcessing = false
@@ -398,22 +394,6 @@ final class SessionData: Identifiable {
         while recentEvents.count > Self.maxEvents {
             recentEvents.removeFirst()
         }
-    }
-
-    private func startDurationTimer() {
-        durationTimer = Task {
-            while !Task.isCancelled {
-                updateFormattedDuration()
-                try? await Task.sleep(for: .seconds(1))
-            }
-        }
-    }
-
-    private func updateFormattedDuration() {
-        let total = Int(Date().timeIntervalSince(sessionStartTime))
-        let minutes = total / 60
-        let seconds = total % 60
-        formattedDuration = String(format: "%dm %02ds", minutes, seconds)
     }
 }
 
