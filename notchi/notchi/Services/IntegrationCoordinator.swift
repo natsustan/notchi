@@ -20,12 +20,19 @@ nonisolated final class IntegrationCoordinator: @unchecked Sendable {
     private var eventContinuation: AsyncStream<HookEvent>.Continuation?
     private var eventDeliveryTask: Task<Void, Never>?
 
+    private let hooksEnabledPreference: @Sendable (AgentProvider) -> Bool
+    private let setHooksEnabledPreference: @Sendable (Bool, AgentProvider) -> Void
+
     init(
         socketServer: SocketServer = .shared,
-        adapters: [any AgentProviderAdapter] = [ClaudeProviderAdapter(), CodexProviderAdapter()]
+        adapters: [any AgentProviderAdapter] = [ClaudeProviderAdapter(), CodexProviderAdapter()],
+        hooksEnabledPreference: @escaping @Sendable (AgentProvider) -> Bool = { AppSettings.areHooksEnabled(for: $0) },
+        setHooksEnabledPreference: @escaping @Sendable (Bool, AgentProvider) -> Void = { AppSettings.setHooksEnabled($0, for: $1) }
     ) {
         self.socketServer = socketServer
         self.adaptersByProvider = Dictionary(uniqueKeysWithValues: adapters.map { ($0.provider, $0) })
+        self.hooksEnabledPreference = hooksEnabledPreference
+        self.setHooksEnabledPreference = setHooksEnabledPreference
     }
 
     func prepareForLaunch() {
@@ -35,7 +42,7 @@ nonisolated final class IntegrationCoordinator: @unchecked Sendable {
     }
 
     func installHooksIfNeeded() {
-        for provider in AgentProvider.allCases where AppSettings.areHooksEnabled(for: provider) {
+        for provider in AgentProvider.allCases where hooksEnabledPreference(provider) {
             _ = adaptersByProvider[provider]?.installIfNeededStatus()
         }
     }
@@ -46,22 +53,30 @@ nonisolated final class IntegrationCoordinator: @unchecked Sendable {
     }
 
     func installStatus(for provider: AgentProvider) -> AgentHookInstallStatus {
-        guard AppSettings.areHooksEnabled(for: provider) else {
+        guard let adapter = adaptersByProvider[provider], adapter.isProviderAvailable() else {
+            return .providerUnavailable
+        }
+        guard hooksEnabledPreference(provider) else {
             return .disabled
         }
-        return adaptersByProvider[provider]?.installStatus() ?? .providerUnavailable
+        return adapter.installStatus()
     }
 
+    // WHY: The enabled preference is only persisted when enabling actually
+    // installs the hooks. Otherwise a failed enable (provider missing, write
+    // error) would leave the stored preference claiming hooks are on while
+    // nothing is installed.
     @discardableResult
     func setHooksEnabled(_ enabled: Bool, for provider: AgentProvider) -> AgentHookInstallStatus {
-        AppSettings.setHooksEnabled(enabled, for: provider)
-
         guard enabled else {
+            setHooksEnabledPreference(false, provider)
             adaptersByProvider[provider]?.uninstall()
             return installStatus(for: provider)
         }
 
-        return installHooksIfNeededStatus(for: provider)
+        let status = installHooksIfNeededStatus(for: provider)
+        setHooksEnabledPreference(status == .installed, provider)
+        return status
     }
 
     func isInstalled(for provider: AgentProvider) -> Bool {

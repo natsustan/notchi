@@ -349,13 +349,13 @@ struct PanelSettingsView: View {
             return StatusBadge(text: "Unavailable", color: TerminalColors.amber)
         }
 
-        if states.contains(.failed) {
-            return StatusBadge(text: "Error", color: TerminalColors.red)
-        }
-
         let enabledStates = states.filter { $0 != .disabled }
         guard !enabledStates.isEmpty else {
             return StatusBadge(text: "Off", color: TerminalColors.dimmedText)
+        }
+
+        if enabledStates.contains(.failed) {
+            return StatusBadge(text: "Error", color: TerminalColors.red)
         }
 
         let installedCount = enabledStates.filter { $0 == .installed }.count
@@ -412,8 +412,11 @@ struct PanelSettingsView: View {
     }
 
     private func toggleHooks(for provider: AgentProvider) {
-        let enabled = !hooksEnabled(for: provider)
-        let status = IntegrationCoordinator.shared.setHooksEnabled(enabled, for: provider)
+        let requestedEnabled = !hooksEnabled(for: provider)
+        let status = IntegrationCoordinator.shared.setHooksEnabled(requestedEnabled, for: provider)
+        // Enabling can fail (provider missing, install error), in which case the
+        // preference is not persisted — read it back instead of assuming.
+        let enabled = AppSettings.areHooksEnabled(for: provider)
 
         switch provider {
         case .claude:

@@ -7,25 +7,45 @@ final class AgentProviderAdapterTests: XCTestCase {
         nonisolated let available: Bool
         nonisolated let installed: Bool
         nonisolated let installSucceeds: Bool
+        nonisolated let onUninstall: @Sendable () -> Void
 
         nonisolated init(
             provider: AgentProvider,
             available: Bool,
             installed: Bool,
-            installSucceeds: Bool = true
+            installSucceeds: Bool = true,
+            onUninstall: @escaping @Sendable () -> Void = {}
         ) {
             self.provider = provider
             self.available = available
             self.installed = installed
             self.installSucceeds = installSucceeds
+            self.onUninstall = onUninstall
         }
 
         nonisolated func installIfNeeded() -> Bool { installSucceeds }
-        nonisolated func uninstall() {}
+        nonisolated func uninstall() { onUninstall() }
         nonisolated func isProviderAvailable() -> Bool { available }
         nonisolated func isInstalled() -> Bool { installed }
         nonisolated func configureForLaunch() {}
         nonisolated func normalize(_ envelope: AgentHookEnvelope) -> HookEvent? { nil }
+    }
+
+    private final class HooksPreferenceRecorder: @unchecked Sendable {
+        private let lock = NSLock()
+        private var enabledByProvider: [AgentProvider: Bool] = [:]
+
+        func set(_ enabled: Bool, for provider: AgentProvider) {
+            lock.lock()
+            defer { lock.unlock() }
+            enabledByProvider[provider] = enabled
+        }
+
+        func value(for provider: AgentProvider) -> Bool? {
+            lock.lock()
+            defer { lock.unlock() }
+            return enabledByProvider[provider]
+        }
     }
 
     func testCodexProviderCapabilitiesIncludePermissionPrompts() {
@@ -300,7 +320,9 @@ final class AgentProviderAdapterTests: XCTestCase {
             adapters: [
                 TestProviderAdapter(provider: .claude, available: false, installed: false),
                 TestProviderAdapter(provider: .codex, available: true, installed: false),
-            ]
+            ],
+            hooksEnabledPreference: { _ in true },
+            setHooksEnabledPreference: { _, _ in }
         )
 
         XCTAssertFalse(coordinator.isProviderAvailable(for: .claude))
@@ -322,12 +344,81 @@ final class AgentProviderAdapterTests: XCTestCase {
                     installed: false,
                     installSucceeds: false
                 ),
-            ]
+            ],
+            hooksEnabledPreference: { _ in true },
+            setHooksEnabledPreference: { _, _ in }
         )
 
         XCTAssertEqual(coordinator.installStatus(for: .claude), .providerUnavailable)
         XCTAssertEqual(coordinator.installHooksIfNeededStatus(for: .claude), .providerUnavailable)
         XCTAssertEqual(coordinator.installStatus(for: .codex), .notInstalled)
         XCTAssertEqual(coordinator.installHooksIfNeededStatus(for: .codex), .failed)
+    }
+
+    func testIntegrationCoordinatorReportsDisabledStatusWhenHooksPreferenceIsOff() {
+        let coordinator = IntegrationCoordinator(
+            socketServer: SocketServer(socketPath: "/tmp/notchi-test-\(UUID().uuidString).sock"),
+            adapters: [
+                TestProviderAdapter(provider: .claude, available: true, installed: true),
+            ],
+            hooksEnabledPreference: { _ in false },
+            setHooksEnabledPreference: { _, _ in }
+        )
+
+        XCTAssertEqual(coordinator.installStatus(for: .claude), .disabled)
+    }
+
+    func testIntegrationCoordinatorReportsProviderUnavailableOverDisabledPreference() {
+        let coordinator = IntegrationCoordinator(
+            socketServer: SocketServer(socketPath: "/tmp/notchi-test-\(UUID().uuidString).sock"),
+            adapters: [
+                TestProviderAdapter(provider: .claude, available: false, installed: false),
+            ],
+            hooksEnabledPreference: { _ in false },
+            setHooksEnabledPreference: { _, _ in }
+        )
+
+        XCTAssertEqual(coordinator.installStatus(for: .claude), .providerUnavailable)
+    }
+
+    func testIntegrationCoordinatorPersistsEnabledPreferenceOnlyWhenInstallSucceeds() {
+        let recorder = HooksPreferenceRecorder()
+        let coordinator = IntegrationCoordinator(
+            socketServer: SocketServer(socketPath: "/tmp/notchi-test-\(UUID().uuidString).sock"),
+            adapters: [
+                TestProviderAdapter(provider: .claude, available: true, installed: true),
+                TestProviderAdapter(provider: .codex, available: true, installed: false, installSucceeds: false),
+            ],
+            hooksEnabledPreference: { recorder.value(for: $0) ?? true },
+            setHooksEnabledPreference: { recorder.set($0, for: $1) }
+        )
+
+        XCTAssertEqual(coordinator.setHooksEnabled(true, for: .claude), .installed)
+        XCTAssertEqual(recorder.value(for: .claude), true)
+
+        XCTAssertEqual(coordinator.setHooksEnabled(true, for: .codex), .failed)
+        XCTAssertEqual(recorder.value(for: .codex), false)
+    }
+
+    func testIntegrationCoordinatorSetHooksDisabledUninstallsAndPersistsPreference() {
+        let recorder = HooksPreferenceRecorder()
+        let uninstallExpectation = expectation(description: "uninstall called")
+        let coordinator = IntegrationCoordinator(
+            socketServer: SocketServer(socketPath: "/tmp/notchi-test-\(UUID().uuidString).sock"),
+            adapters: [
+                TestProviderAdapter(
+                    provider: .claude,
+                    available: true,
+                    installed: true,
+                    onUninstall: { uninstallExpectation.fulfill() }
+                ),
+            ],
+            hooksEnabledPreference: { recorder.value(for: $0) ?? true },
+            setHooksEnabledPreference: { recorder.set($0, for: $1) }
+        )
+
+        XCTAssertEqual(coordinator.setHooksEnabled(false, for: .claude), .disabled)
+        XCTAssertEqual(recorder.value(for: .claude), false)
+        wait(for: [uninstallExpectation], timeout: 1)
     }
 }
