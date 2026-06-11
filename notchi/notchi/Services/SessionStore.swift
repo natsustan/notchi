@@ -1003,12 +1003,28 @@ nonisolated enum CodexThreadMetadataResolver {
             return nil
         }
 
-        let query = "SELECT id, rollout_path, hex(title), archived FROM threads;"
+        let query = threadsQuery(matchingTranscriptPath: trimmedPath)
         guard let output = CodexFileSystem.runSQLite(query: query, databasePath: stateURL.path) else {
             return nil
         }
 
         return metadata(fromSQLiteOutput: output, matchingTranscriptPath: trimmedPath)
+    }
+
+    // WHY: Dumping every thread row makes the periodic monitor loop re-parse the
+    // whole table; filtering in SQLite keeps the output to this session's row(s).
+    static func threadsQuery(matchingTranscriptPath transcriptPath: String) -> String {
+        var conditions = ["rollout_path = '\(sqlEscaped(transcriptPath))'"]
+        if let threadId = codexThreadId(from: transcriptPath) {
+            conditions.append("id = '\(sqlEscaped(threadId))'")
+        }
+
+        return "SELECT id, rollout_path, hex(title), archived FROM threads " +
+            "WHERE \(conditions.joined(separator: " OR "));"
+    }
+
+    private static func sqlEscaped(_ value: String) -> String {
+        value.replacingOccurrences(of: "'", with: "''")
     }
 
     static func metadata(fromSQLiteOutput output: String, matchingTranscriptPath transcriptPath: String) -> CodexThreadMetadata? {

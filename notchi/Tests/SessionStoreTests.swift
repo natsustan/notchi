@@ -1032,6 +1032,29 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(metadata, CodexThreadMetadata(title: "Archived", archived: true))
     }
 
+    func testCodexThreadMetadataResolverQueryFiltersByEscapedRolloutPathAndThreadId() {
+        let threadId = "123e4567-e89b-12d3-a456-426614174000"
+        let transcriptPath = "/tmp/it's-rollout-\(threadId).jsonl"
+
+        let query = CodexThreadMetadataResolver.threadsQuery(matchingTranscriptPath: transcriptPath)
+
+        XCTAssertEqual(
+            query,
+            "SELECT id, rollout_path, hex(title), archived FROM threads " +
+                "WHERE rollout_path = '/tmp/it''s-rollout-\(threadId).jsonl' OR id = '\(threadId)';"
+        )
+    }
+
+    func testCodexThreadMetadataResolverQueryWithoutDerivableThreadIdFiltersByPathOnly() {
+        let query = CodexThreadMetadataResolver.threadsQuery(matchingTranscriptPath: "/tmp/rollout.jsonl")
+
+        XCTAssertEqual(
+            query,
+            "SELECT id, rollout_path, hex(title), archived FROM threads " +
+                "WHERE rollout_path = '/tmp/rollout.jsonl';"
+        )
+    }
+
     func testCodexCompactionSignalResolverParsesLatestTokenLimitLogRow() {
         let separator = "\u{1F}"
         let threadId = "11111111-1111-1111-1111-111111111111"
