@@ -26,6 +26,7 @@ final class NotchHitTestView: NSView {
         }
 
         guard let window, let manager = panelManager else { return }
+        guard manager.notchSize != .zero else { return }
         let screenRect = manager.collapsedTrackingRect
         guard !screenRect.isEmpty else { return }
 
