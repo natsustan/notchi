@@ -97,6 +97,28 @@ final class SessionDataTests: XCTestCase {
         }
     }
 
+    func testMotionFrameIntervalUsesFullCadenceOnlyForFastMotion() {
+        let fullCadenceCases: [NotchiState] = [
+            NotchiState(task: .working),
+            NotchiState(task: .working, emotion: .happy),
+            NotchiState(task: .idle, emotion: .sob),
+            NotchiState(task: .waiting, emotion: .sob),
+        ]
+        let halfCadenceCases: [NotchiState] = [
+            NotchiState(task: .idle),
+            NotchiState(task: .waiting),
+            NotchiState(task: .idle, emotion: .happy),
+            NotchiState(task: .sleeping),
+        ]
+
+        for state in fullCadenceCases {
+            XCTAssertEqual(state.motionFrameInterval, 1.0 / 30.0, accuracy: 0.0001, state.spriteSheetName)
+        }
+        for state in halfCadenceCases {
+            XCTAssertEqual(state.motionFrameInterval, 1.0 / 15.0, accuracy: 0.0001, state.spriteSheetName)
+        }
+    }
+
     func testSpriteMirrorPoliciesAreExplicitByTask() {
         XCTAssertEqual(NotchiState(task: .idle).mirrorPolicy, .timed(30...60))
         XCTAssertEqual(NotchiState(task: .waiting).mirrorPolicy, .timed(45...90))
