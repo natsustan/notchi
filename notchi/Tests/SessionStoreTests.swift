@@ -1032,6 +1032,46 @@ final class SessionStoreTests: XCTestCase {
         XCTAssertEqual(metadata, CodexThreadMetadata(title: "Archived", archived: true))
     }
 
+    func testCodexThreadMetadataResolverQueryFiltersByEscapedRolloutPathAndThreadId() {
+        let threadId = "123e4567-e89b-12d3-a456-426614174000"
+        let transcriptPath = "/tmp/it's-rollout-\(threadId).jsonl"
+
+        let query = CodexThreadMetadataResolver.threadsQuery(matchingTranscriptPaths: [transcriptPath])
+
+        XCTAssertEqual(
+            query,
+            "SELECT id, rollout_path, hex(title), archived FROM threads " +
+                "WHERE rollout_path IN ('/tmp/it''s-rollout-\(threadId).jsonl') OR id IN ('\(threadId)');"
+        )
+    }
+
+    func testCodexThreadMetadataResolverQueryWithoutDerivableThreadIdFiltersByPathOnly() {
+        let query = CodexThreadMetadataResolver.threadsQuery(matchingTranscriptPaths: ["/tmp/rollout.jsonl"])
+
+        XCTAssertEqual(
+            query,
+            "SELECT id, rollout_path, hex(title), archived FROM threads " +
+                "WHERE rollout_path IN ('/tmp/rollout.jsonl');"
+        )
+    }
+
+    func testCodexThreadMetadataResolverQueryFiltersAllRequestedPathsInOneStatement() {
+        let threadId = "123e4567-e89b-12d3-a456-426614174000"
+        let withThreadId = "/tmp/rollout-\(threadId).jsonl"
+        let withoutThreadId = "/tmp/plain-rollout.jsonl"
+
+        let query = CodexThreadMetadataResolver.threadsQuery(
+            matchingTranscriptPaths: [withThreadId, withoutThreadId]
+        )
+
+        XCTAssertEqual(
+            query,
+            "SELECT id, rollout_path, hex(title), archived FROM threads " +
+                "WHERE rollout_path IN ('/tmp/rollout-\(threadId).jsonl', '/tmp/plain-rollout.jsonl') " +
+                "OR id IN ('\(threadId)');"
+        )
+    }
+
     func testCodexThreadMetadataResolverMatchesMultiplePathsFromSingleSQLiteOutput() {
         let separator = "\u{1F}"
         let reviewPath = "/tmp/review-rollout.jsonl"

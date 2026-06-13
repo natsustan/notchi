@@ -1024,7 +1024,7 @@ nonisolated enum CodexThreadMetadataResolver {
             return [:]
         }
 
-        let query = "SELECT id, rollout_path, hex(title), archived FROM threads;"
+        let query = threadsQuery(matchingTranscriptPaths: requestedPaths)
         guard let output = CodexFileSystem.runSQLite(query: query, databasePath: stateURL.path) else {
             return [:]
         }
@@ -1046,6 +1046,29 @@ nonisolated enum CodexThreadMetadataResolver {
             )
         }
         return metadataByPath
+    }
+
+    // WHY: Dumping every thread row makes the periodic monitor loop re-parse the
+    // whole table; filtering in SQLite keeps the output to the tracked sessions'
+    // row(s) while still resolving every session in one sqlite invocation.
+    static func threadsQuery(matchingTranscriptPaths transcriptPaths: [String]) -> String {
+        let trimmedPaths = transcriptPaths
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let rolloutLiterals = trimmedPaths.map { "'\(sqlEscaped($0))'" }
+        let threadIdLiterals = trimmedPaths.compactMap(codexThreadId).map { "'\(sqlEscaped($0))'" }
+
+        var conditions = ["rollout_path IN (\(rolloutLiterals.joined(separator: ", ")))"]
+        if !threadIdLiterals.isEmpty {
+            conditions.append("id IN (\(threadIdLiterals.joined(separator: ", ")))")
+        }
+
+        return "SELECT id, rollout_path, hex(title), archived FROM threads " +
+            "WHERE \(conditions.joined(separator: " OR "));"
+    }
+
+    private static func sqlEscaped(_ value: String) -> String {
+        value.replacingOccurrences(of: "'", with: "''")
     }
 
     static func metadata(fromSQLiteOutput output: String, matchingTranscriptPath transcriptPath: String) -> CodexThreadMetadata? {

@@ -10,6 +10,12 @@ private struct ResolverProcessCall: Equatable {
 
 @MainActor
 final class ClaudeCLIResolverTests: XCTestCase {
+    override func setUp() {
+        super.setUp()
+        ClaudeConfigDirectoryResolver.resetTestingHooks()
+        ClaudeCLIResolver.resetTestingHooks()
+    }
+
     override func tearDown() {
         ClaudeConfigDirectoryResolver.resetTestingHooks()
         ClaudeCLIResolver.resetTestingHooks()
