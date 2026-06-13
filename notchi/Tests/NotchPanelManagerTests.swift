@@ -403,6 +403,24 @@ final class NotchPanelManagerTests: XCTestCase {
         XCTAssertFalse(manager.isCollapsedHovered)
     }
 
+    func testHideSpritePreferenceGateSkipsRedundantIdleRefresh() async {
+        let defaults = makeDefaults()
+        defaults.set(true, forKey: AppSettings.hideSpriteWhenIdleKey)
+        let sessionCount = SessionCountBox(0)
+        let manager = makeManager(sessionCount: sessionCount, defaults: defaults)
+
+        configureGeometry(for: manager)
+        XCTAssertEqual(manager.collapsedMode, .compactIdle)
+
+        sessionCount.value = 1
+        manager.refreshIdleModeIfHideSpritePreferenceChanged()
+        XCTAssertEqual(manager.collapsedMode, .compactIdle)
+
+        defaults.set(false, forKey: AppSettings.hideSpriteWhenIdleKey)
+        manager.refreshIdleModeIfHideSpritePreferenceChanged()
+        XCTAssertEqual(manager.collapsedMode, .normalCollapsed)
+    }
+
     private func makeDefaults() -> UserDefaults {
         let suiteName = "NotchPanelManagerTests-\(UUID().uuidString)"
         defaultsSuiteNames.append(suiteName)

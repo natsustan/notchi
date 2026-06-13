@@ -41,6 +41,7 @@ final class NotchPanelManager {
 
     private var observerTokens: [NSObjectProtocol] = []
     private var cachedShouldUseCompactIdle = false
+    private var observedHideSpriteWhenIdle = false
     private var pendingHoverExitTask: Task<Void, Never>?
     private var mouseDownMonitor: EventMonitor?
 
@@ -85,6 +86,7 @@ final class NotchPanelManager {
         self.mouseLocationProvider = mouseLocationProvider
         self.collapsedHoverEnterFeedback = collapsedHoverEnterFeedback
         self.pinToggleFeedback = pinToggleFeedback
+        self.observedHideSpriteWhenIdle = userDefaults.bool(forKey: AppSettings.hideSpriteWhenIdleKey)
 
         if startEventMonitors {
             setupEventMonitors()
@@ -226,6 +228,13 @@ final class NotchPanelManager {
         resyncCollapsedHoverIfNeeded()
     }
 
+    func refreshIdleModeIfHideSpritePreferenceChanged() {
+        let current = userDefaults.bool(forKey: AppSettings.hideSpriteWhenIdleKey)
+        guard current != observedHideSpriteWhenIdle else { return }
+        observedHideSpriteWhenIdle = current
+        refreshIdleMode()
+    }
+
     private func setupObservers() {
         observerTokens.append(
             notificationCenter.addObserver(
@@ -246,7 +255,7 @@ final class NotchPanelManager {
                 queue: nil
             ) { [weak self] _ in
                 Task { @MainActor [weak self] in
-                    self?.refreshIdleMode()
+                    self?.refreshIdleModeIfHideSpritePreferenceChanged()
                 }
             }
         )
