@@ -424,12 +424,18 @@ actor ConversationParser {
             .trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func parseTimestamp(from timestampString: String?) -> Date {
-        guard let timestampString else { return Date() }
-
+    private static let isoFractionalFormatter: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter.date(from: timestampString) ?? Date()
+        return formatter
+    }()
+    private static let isoBasicFormatter = ISO8601DateFormatter()
+
+    private static func parseTimestamp(from timestampString: String?) -> Date {
+        guard let timestampString else { return Date() }
+        return isoFractionalFormatter.date(from: timestampString)
+            ?? isoBasicFormatter.date(from: timestampString)
+            ?? Date()
     }
 
     private static func stableContentDigest(for line: String) -> String {

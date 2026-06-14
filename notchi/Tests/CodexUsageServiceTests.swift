@@ -37,6 +37,66 @@ final class CodexUsageServiceTests: XCTestCase {
         XCTAssertEqual(snapshot.usage.usagePercentage, 15)
     }
 
+    func testResolverFindsLatestTokenCountInTailOfRolloutLargerThanWindow() throws {
+        let rolloutURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-large-usage-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: rolloutURL) }
+
+        let oldTokenCount = #"{"timestamp":"2026-04-25T07:01:00.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":7.4,"window_minutes":300,"resets_at":1777103326}}}}"#
+        let padding = #"{"type":"event_msg","payload":{"type":"message","content":""# +
+            String(repeating: "x", count: 2_048) + #""}}"#
+        let latestTokenCount = #"{"timestamp":"2026-04-25T07:03:14.886Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":42.0,"window_minutes":300,"resets_at":1777103326}}}}"#
+        let contents = [oldTokenCount, padding, latestTokenCount].joined(separator: "\n")
+        try contents.write(to: rolloutURL, atomically: true, encoding: .utf8)
+
+        let snapshot = try XCTUnwrap(CodexUsageSnapshotResolver.latestSnapshot(
+            transcriptPath: rolloutURL.path,
+            maxTailBytes: 512
+        ))
+
+        XCTAssertEqual(snapshot.usage.usagePercentage, 42)
+    }
+
+    func testResolverKeepsTokenCountWhenTailWindowStartsOnLineBoundary() throws {
+        let rolloutURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-boundary-usage-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: rolloutURL) }
+
+        let prefix = #"{"type":"event_msg","payload":{"type":"message","content":"x"}}"#
+        let tokenCount = #"{"timestamp":"2026-04-25T07:03:14.886Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":42.0,"window_minutes":300,"resets_at":1777103326}}}}"#
+        let contents = prefix + "\n" + tokenCount + "\n"
+        try contents.write(to: rolloutURL, atomically: true, encoding: .utf8)
+
+        // Size the window so it begins exactly at the token-count line's first byte,
+        // i.e. immediately after the prefix line's newline.
+        let tokenCountStart = (prefix + "\n").utf8.count
+        let maxTailBytes = Data(contents.utf8).count - tokenCountStart
+
+        let snapshot = try XCTUnwrap(CodexUsageSnapshotResolver.latestSnapshot(
+            transcriptPath: rolloutURL.path,
+            maxTailBytes: maxTailBytes
+        ))
+
+        XCTAssertEqual(snapshot.usage.usagePercentage, 42)
+    }
+
+    func testResolverIgnoresTokenCountOutsideTailWindow() throws {
+        let rolloutURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-head-usage-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: rolloutURL) }
+
+        let tokenCount = #"{"timestamp":"2026-04-25T07:01:00.000Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":7.4,"window_minutes":300,"resets_at":1777103326}}}}"#
+        let padding = #"{"type":"event_msg","payload":{"type":"message","content":""# +
+            String(repeating: "x", count: 2_048) + #""}}"#
+        let contents = [tokenCount, padding].joined(separator: "\n")
+        try contents.write(to: rolloutURL, atomically: true, encoding: .utf8)
+
+        XCTAssertNil(CodexUsageSnapshotResolver.latestSnapshot(
+            transcriptPath: rolloutURL.path,
+            maxTailBytes: 256
+        ))
+    }
+
     func testRefreshMarksOldButUnexpiredUsageAsStaleWithoutStatusMessage() async {
         let observedAt = Date(timeIntervalSince1970: 1_000)
         let now = Date(timeIntervalSince1970: 1_930)

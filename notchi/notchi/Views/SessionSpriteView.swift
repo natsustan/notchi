@@ -7,18 +7,24 @@ struct SessionSpriteView: View {
     var animationStartDate: Date = SpriteAnimationPhase.sharedLoopAnchor
     var repeatsAnimation = true
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var stateMirrorKey: String?
     @State private var stateMirrored = false
 
     private var bobAmplitude: CGFloat {
-        guard state.bobAmplitude > 0 else { return 0 }
+        guard !reduceMotion, state.bobAmplitude > 0 else { return 0 }
         return isPrimarySprite ? state.bobAmplitude : state.bobAmplitude * 0.67
+    }
+
+    private var trembleAmplitude: CGFloat {
+        guard !reduceMotion, state.emotion == .sob else { return 0 }
+        return Self.sobTrembleAmplitude
     }
 
     private static let sobTrembleAmplitude: CGFloat = 0.2
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: bobAmplitude == 0 && state.emotion != .sob)) { timeline in
+        TimelineView(.animation(minimumInterval: state.motionFrameInterval, paused: bobAmplitude == 0 && trembleAmplitude == 0)) { timeline in
             let presentation = spriteSheetPresentation(at: timeline.date)
             SpriteSheetView(
                 spriteSheet: presentation.spriteSheetName,
@@ -32,7 +38,7 @@ struct SessionSpriteView: View {
             )
             .frame(width: 32, height: 32)
             .offset(
-                x: trembleOffset(at: timeline.date, amplitude: state.emotion == .sob ? Self.sobTrembleAmplitude : 0),
+                x: trembleOffset(at: timeline.date, amplitude: trembleAmplitude),
                 y: bobOffset(at: timeline.date, duration: state.bobDuration, amplitude: bobAmplitude)
             )
         }

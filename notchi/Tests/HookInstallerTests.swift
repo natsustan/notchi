@@ -67,6 +67,13 @@ final class HookInstallerTests: XCTestCase {
         XCTAssertEqual(sessionStartHooks.first?["command"] as? String, HookInstaller.hookCommand)
     }
 
+    func testUpsertHookSettingsIsIdempotentSoReinstallSkipsRewrite() throws {
+        let first = try XCTUnwrap(HookInstaller.upsertHookSettings(from: nil, command: HookInstaller.hookCommand))
+        let second = try XCTUnwrap(HookInstaller.upsertHookSettings(from: first, command: HookInstaller.hookCommand))
+
+        XCTAssertEqual(first, second)
+    }
+
     func testBundledHookDoesNotWaitForHeadlessPermissionRequests() throws {
         let testDirectory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
         let hookScript = testDirectory

@@ -48,7 +48,7 @@ struct ClaudeUsageServiceDependencies {
     var loadRecoverySnapshot: () -> ClaudeUsageRecoverySnapshot?
     var saveRecoverySnapshot: (ClaudeUsageRecoverySnapshot) -> Void
     var clearRecoverySnapshot: () -> Void
-    var resolveUserAgent: () -> String?
+    var resolveUserAgent: () async -> String?
     var pollJitter: () -> Double
     var now: () -> Date
     var schedulePoll: @MainActor (TimeInterval, @escaping () -> Void) -> any ClaudeUsagePollTimer
@@ -356,7 +356,10 @@ enum ClaudeConfigDirectoryResolver {
     }
 }
 
-enum ClaudeCLIResolver {
+// WHY: User-agent resolution spawns shell/CLI probes with multi-second
+// timeouts, so it must stay callable from background executors instead of
+// inheriting the project's MainActor default.
+nonisolated enum ClaudeCLIResolver {
     struct TestHooks: Sendable {
         let environment: @Sendable () -> [String: String]
         let isExecutableFile: @Sendable (String) -> Bool
@@ -367,12 +370,28 @@ enum ClaudeCLIResolver {
         ) -> String?
     }
 
-    nonisolated private static let commandTimeout: TimeInterval = 2
-    static var testHooks = makeDefaultTestHooks()
+    private static let commandTimeout: TimeInterval = 2
+    private static let stateQueue = DispatchQueue(
+        label: "com.ruban.notchi.claudeCLIResolver.state"
+    )
+    // WHY: resolution runs on background executors while tests mutate hooks
+    // from the main actor, so guard the shared state with stateQueue and
+    // snapshot it once per resolution.
+    nonisolated(unsafe) private static var lockedTestHooks = makeDefaultTestHooks()
+
+    static var testHooks: TestHooks {
+        get {
+            stateQueue.sync { lockedTestHooks }
+        }
+        set {
+            stateQueue.sync { lockedTestHooks = newValue }
+        }
+    }
 
     static func resolveUserAgent() -> String? {
-        for claudePath in knownExecutablePaths() {
-            guard let version = resolveVersion(at: claudePath) else { continue }
+        let hooks = testHooks
+        for claudePath in knownExecutablePaths(testHooks: hooks) {
+            guard let version = resolveVersion(at: claudePath, testHooks: hooks) else { continue }
             return "claude-code/\(version)"
         }
 
@@ -400,7 +419,7 @@ enum ClaudeCLIResolver {
         )
     }
 
-    private static func knownExecutablePaths() -> [String] {
+    private static func knownExecutablePaths(testHooks: TestHooks) -> [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
         let environment = testHooks.environment()
         let explicitPaths = [
@@ -412,7 +431,8 @@ enum ClaudeCLIResolver {
         let pathDerivedCandidates = (environment["PATH"] ?? "")
             .split(separator: ":")
             .map { "\($0)/claude" }
-        let shellResolvedPath = resolveCommandPathViaShell(environment: environment).map { [$0] } ?? []
+        let shellResolvedPath = resolveCommandPathViaShell(environment: environment, testHooks: testHooks)
+            .map { [$0] } ?? []
 
         var resolvedPaths: [String] = []
         var seenPaths: Set<String> = []
@@ -429,11 +449,19 @@ enum ClaudeCLIResolver {
     }
 
     static func resolveCommandPathViaShell(environment: [String: String]) -> String? {
+        resolveCommandPathViaShell(environment: environment, testHooks: testHooks)
+    }
+
+    private static func resolveCommandPathViaShell(
+        environment: [String: String],
+        testHooks: TestHooks
+    ) -> String? {
         for shellPath in shellCandidates(from: environment) {
             guard testHooks.isExecutableFile(shellPath) else { continue }
             if let resolvedPath = resolveCommandPathViaShell(
                 executablePath: shellPath,
-                arguments: ["-lc", "command -v claude"]
+                arguments: ["-lc", "command -v claude"],
+                testHooks: testHooks
             ) {
                 return resolvedPath
             }
@@ -441,7 +469,8 @@ enum ClaudeCLIResolver {
             // nvm commonly exposes claude from interactive rc files like .zshrc, not login-only startup files.
             if let resolvedPath = resolveCommandPathViaShell(
                 executablePath: shellPath,
-                arguments: ["-ic", "command -v claude"]
+                arguments: ["-ic", "command -v claude"],
+                testHooks: testHooks
             ) {
                 return resolvedPath
             }
@@ -452,7 +481,8 @@ enum ClaudeCLIResolver {
 
     private static func resolveCommandPathViaShell(
         executablePath: String,
-        arguments: [String]
+        arguments: [String],
+        testHooks: TestHooks
     ) -> String? {
         guard let output = testHooks.runProcess(executablePath, arguments, nil) else {
             return nil
@@ -474,16 +504,21 @@ enum ClaudeCLIResolver {
     }
 
     static func resolveVersion(at path: String) -> String? {
-        let environment = versionProbeEnvironment(for: path)
+        resolveVersion(at: path, testHooks: testHooks)
+    }
+
+    private static func resolveVersion(at path: String, testHooks: TestHooks) -> String? {
+        let environment = versionProbeEnvironment(for: path, testHooks: testHooks)
         if let version = resolveVersion(
             executablePath: path,
             arguments: ["--version"],
-            environment: environment
+            environment: environment,
+            testHooks: testHooks
         ) {
             return version
         }
 
-        return resolveVersionViaShell(at: path, environment: environment)
+        return resolveVersionViaShell(at: path, environment: environment, testHooks: testHooks)
     }
 
     static func extractVersion(from output: String) -> String? {
@@ -504,7 +539,7 @@ enum ClaudeCLIResolver {
             .filter { seenShells.insert($0).inserted }
     }
 
-    private static func versionProbeEnvironment(for path: String) -> [String: String] {
+    private static func versionProbeEnvironment(for path: String, testHooks: TestHooks) -> [String: String] {
         var environment = testHooks.environment()
         let executableDirectory = URL(fileURLWithPath: path).deletingLastPathComponent().path
         let existingPath = environment["PATH"]?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -520,7 +555,8 @@ enum ClaudeCLIResolver {
 
     private static func resolveVersionViaShell(
         at path: String,
-        environment: [String: String]
+        environment: [String: String],
+        testHooks: TestHooks
     ) -> String? {
         for shellPath in shellCandidates(from: environment) {
             guard testHooks.isExecutableFile(shellPath) else { continue }
@@ -529,7 +565,8 @@ enum ClaudeCLIResolver {
             if let version = resolveVersion(
                 executablePath: shellPath,
                 arguments: ["-lc", "\"$1\" --version", shellArg0, path],
-                environment: environment
+                environment: environment,
+                testHooks: testHooks
             ) {
                 return version
             }
@@ -537,7 +574,8 @@ enum ClaudeCLIResolver {
             if let version = resolveVersion(
                 executablePath: shellPath,
                 arguments: ["-ic", "\"$1\" --version", shellArg0, path],
-                environment: environment
+                environment: environment,
+                testHooks: testHooks
             ) {
                 return version
             }
@@ -549,7 +587,8 @@ enum ClaudeCLIResolver {
     private static func resolveVersion(
         executablePath: String,
         arguments: [String],
-        environment: [String: String]
+        environment: [String: String],
+        testHooks: TestHooks
     ) -> String? {
         guard let output = testHooks.runProcess(executablePath, arguments, environment) else {
             return nil
@@ -616,7 +655,11 @@ extension ClaudeUsageServiceDependencies {
             AppSettings.claudeUsageRecoverySnapshot = nil
         },
         resolveUserAgent: {
-            ClaudeCLIResolver.resolveUserAgent()
+            // WHY: the resolver can block for seconds on shell/CLI probes, so
+            // run it off the main actor that ClaudeUsageService lives on.
+            await Task.detached(priority: .utility) {
+                ClaudeCLIResolver.resolveUserAgent()
+            }.value
         },
         pollJitter: {
             Double.random(in: -2...2)
@@ -969,7 +1012,7 @@ final class ClaudeUsageService {
 
         defer { if userInitiated { isLoading = false } }
 
-        guard let userAgent = resolveUserAgent() else {
+        guard let userAgent = await resolveUserAgent() else {
             presentReconnectRequired(message: "Install Claude Code CLI to continue")
             stopPolling()
             return
@@ -1321,7 +1364,7 @@ final class ClaudeUsageService {
     }
 
     private func refreshActiveHeadersFallback(with accessToken: String) async {
-        guard let userAgent = resolveUserAgent() else {
+        guard let userAgent = await resolveUserAgent() else {
             presentReconnectRequired(message: "Install Claude Code CLI to continue")
             stopPolling()
             return
@@ -1560,12 +1603,12 @@ final class ClaudeUsageService {
         return Self.isoFractional.date(from: value) ?? Self.isoBasic.date(from: value)
     }
 
-    private func resolveUserAgent() -> String? {
+    private func resolveUserAgent() async -> String? {
         if let resolvedUserAgent {
             return resolvedUserAgent
         }
 
-        guard let resolved = dependencies.resolveUserAgent() else {
+        guard let resolved = await dependencies.resolveUserAgent() else {
             return nil
         }
 
@@ -1765,7 +1808,7 @@ final class ClaudeUsageService {
 
     private func handleRetryDuringOAuthBackoff(with accessToken: String, remaining: TimeInterval) async {
         if !didAttemptHeadersFallbackInOAuthBackoff {
-            guard let userAgent = resolveUserAgent() else {
+            guard let userAgent = await resolveUserAgent() else {
                 presentReconnectRequired(message: "Install Claude Code CLI to continue")
                 stopPolling()
                 return

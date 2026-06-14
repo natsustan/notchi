@@ -9,7 +9,7 @@ nonisolated private let integrationLogger = Logger(subsystem: "com.ruban.notchi"
 nonisolated final class IntegrationCoordinator: @unchecked Sendable {
     static let shared = IntegrationCoordinator()
 
-    private let socketServer: SocketServer
+    private let eventSource: any AgentHookEventSource
     private let adaptersByProvider: [AgentProvider: any AgentProviderAdapter]
     // Socket callbacks arrive from SocketServer's concurrent client queue, so we
     // serialize delivery before handing events to the shared UI/state pipeline.
@@ -24,12 +24,12 @@ nonisolated final class IntegrationCoordinator: @unchecked Sendable {
     private let setHooksEnabledPreference: @Sendable (Bool, AgentProvider) -> Void
 
     init(
-        socketServer: SocketServer = .shared,
+        eventSource: any AgentHookEventSource = SocketServer.shared,
         adapters: [any AgentProviderAdapter] = [ClaudeProviderAdapter(), CodexProviderAdapter()],
         hooksEnabledPreference: @escaping @Sendable (AgentProvider) -> Bool = { AppSettings.areHooksEnabled(for: $0) },
         setHooksEnabledPreference: @escaping @Sendable (Bool, AgentProvider) -> Void = { AppSettings.setHooksEnabled($0, for: $1) }
     ) {
-        self.socketServer = socketServer
+        self.eventSource = eventSource
         self.adaptersByProvider = Dictionary(uniqueKeysWithValues: adapters.map { ($0.provider, $0) })
         self.hooksEnabledPreference = hooksEnabledPreference
         self.setHooksEnabledPreference = setHooksEnabledPreference
@@ -94,7 +94,7 @@ nonisolated final class IntegrationCoordinator: @unchecked Sendable {
     func start(onEvent: @escaping @MainActor (HookEvent) -> Void) {
         startEventDeliveryIfNeeded(onEvent: onEvent)
 
-        socketServer.start { [weak self] envelope in
+        eventSource.start { [weak self] envelope in
             guard let self else { return nil }
             guard let event = self.normalize(envelope) else {
                 integrationLogger.warning(
@@ -113,7 +113,7 @@ nonisolated final class IntegrationCoordinator: @unchecked Sendable {
     }
 
     func stop() {
-        socketServer.stop()
+        eventSource.stop()
         stopEventDelivery()
     }
 

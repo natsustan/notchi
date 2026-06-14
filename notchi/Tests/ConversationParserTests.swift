@@ -242,6 +242,25 @@ final class ConversationParserTests: XCTestCase {
         XCTAssertEqual(first.messages.first?.id, second.messages.first?.id)
     }
 
+    func testParseIncrementalParsesTimestampsWithoutFractionalSeconds() async throws {
+        let sessionId = "basic-timestamp-\(UUID().uuidString)"
+        let transcriptPath = tempDirectoryURL
+            .appendingPathComponent("\(UUID().uuidString).jsonl")
+            .path
+        let parser = ConversationParser.shared
+
+        // 2026-04-07T09:50:04Z
+        let expectedTimestamp = Date(timeIntervalSince1970: 1_775_555_404)
+        let line = """
+        {"type":"assistant","uuid":"assistant-basic-timestamp","timestamp":"2026-04-07T09:50:04Z","message":{"model":"claude-opus-4-6","role":"assistant","content":[{"type":"text","text":"No fractional seconds"}]}}
+        """
+        FileManager.default.createFile(atPath: transcriptPath, contents: Data((line + "\n").utf8))
+
+        let result = await parser.parseIncremental(sessionId: sessionId, transcriptPath: transcriptPath)
+
+        XCTAssertEqual(result.messages.first?.timestamp, expectedTimestamp)
+    }
+
     private func assistantLine(uuid: String, text: String, model: String) -> String {
         let timestamp = "2026-04-07T09:50:04.954Z"
         return """

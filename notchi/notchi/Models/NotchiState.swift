@@ -207,6 +207,9 @@ struct NotchiState: Equatable {
     }
 
     var bobDuration: Double { task.bobDuration }
+    var motionFrameInterval: Double {
+        (task == .working || emotion == .sob) ? 1.0 / 30.0 : 1.0 / 15.0
+    }
     var bobAmplitude: CGFloat {
         switch emotion {
         case .sob: return 0

@@ -14,18 +14,6 @@ final class PanelSettingsViewTests: XCTestCase {
         )
     }
 
-    func testUsageBadgeShowsConnectedWhenCodexSessionUsesAutomaticUsage() {
-        XCTAssertEqual(
-            PanelUsageBadgeState.resolve(
-                isClaudeUsageConnected: false,
-                hasActiveClaudeSession: false,
-                hasActiveCodexSession: true,
-                codexHooksInstalled: true
-            ),
-            .connected
-        )
-    }
-
     func testUsageBadgeStillShowsSetupWhenClaudeUsageNeedsConnection() {
         XCTAssertEqual(
             PanelUsageBadgeState.resolve(

@@ -4,16 +4,22 @@ import XCTest
 
 @MainActor
 final class SessionDataTests: XCTestCase {
-    func testResolveXPositionReturnsCandidateWithinConfiguredRange() {
-        let positions = stride(from: 0.05, through: 0.95, by: 0.15).map { CGFloat($0) }
-
+    func testResolveXPositionUsesHashDerivedCandidateWhenItDoesNotCollide() {
         let resolved = SessionData.resolveXPositionForTesting(
             hash: 0,
-            existingPositions: positions
+            existingPositions: [CGFloat(0.50)]
         )
 
-        XCTAssertGreaterThanOrEqual(resolved, CGFloat(0.05))
-        XCTAssertLessThanOrEqual(resolved, CGFloat(0.95))
+        XCTAssertEqual(resolved, CGFloat(0.05), accuracy: 0.0001)
+    }
+
+    func testResolveXPositionNudgesPastCollidingSessionToNextSeparatedCandidate() {
+        let resolved = SessionData.resolveXPositionForTesting(
+            hash: 0,
+            existingPositions: [CGFloat(0.05)]
+        )
+
+        XCTAssertEqual(resolved, CGFloat(0.28), accuracy: 0.0001)
     }
 
     func testResolveXPositionFallsBackToMostSeparatedCandidateWhenAllCandidatesOverlap() {
@@ -88,6 +94,28 @@ final class SessionDataTests: XCTestCase {
 
         for (state, expectedFPS) in targetFPSCases {
             XCTAssertEqual(state.animationFPS, expectedFPS, accuracy: 0.0001, state.spriteSheetName)
+        }
+    }
+
+    func testMotionFrameIntervalUsesFullCadenceOnlyForFastMotion() {
+        let fullCadenceCases: [NotchiState] = [
+            NotchiState(task: .working),
+            NotchiState(task: .working, emotion: .happy),
+            NotchiState(task: .idle, emotion: .sob),
+            NotchiState(task: .waiting, emotion: .sob),
+        ]
+        let halfCadenceCases: [NotchiState] = [
+            NotchiState(task: .idle),
+            NotchiState(task: .waiting),
+            NotchiState(task: .idle, emotion: .happy),
+            NotchiState(task: .sleeping),
+        ]
+
+        for state in fullCadenceCases {
+            XCTAssertEqual(state.motionFrameInterval, 1.0 / 30.0, accuracy: 0.0001, state.spriteSheetName)
+        }
+        for state in halfCadenceCases {
+            XCTAssertEqual(state.motionFrameInterval, 1.0 / 15.0, accuracy: 0.0001, state.spriteSheetName)
         }
     }
 

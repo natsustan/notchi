@@ -5,10 +5,15 @@ nonisolated private let logger = Logger(subsystem: "com.ruban.notchi", category:
 
 typealias AgentHookEnvelopeHandler = @Sendable (AgentHookEnvelope) -> Data?
 
+nonisolated protocol AgentHookEventSource: AnyObject, Sendable {
+    nonisolated func start(onEvent: @escaping AgentHookEnvelopeHandler)
+    nonisolated func stop()
+}
+
 // WHY: SocketServer owns its synchronization via serverQueue/clientQueue rather
 // than the main actor, so it should not inherit the project's default UI
 // isolation.
-nonisolated final class SocketServer: @unchecked Sendable {
+nonisolated final class SocketServer: AgentHookEventSource, @unchecked Sendable {
     static let socketPath = "/tmp/notchi.sock"
     static let shared = SocketServer(socketPath: socketPath, clientReadTimeout: 0.5)
     private static let startRetryDelay: DispatchTimeInterval = .milliseconds(250)

@@ -83,4 +83,19 @@ final class CodexHookInstallerTests: XCTestCase {
         XCTAssertTrue(updated.contains("[features]"))
         XCTAssertTrue(updated.contains("codex_hooks = true"))
     }
+
+    func testUpsertHooksJSONIsIdempotentSoReinstallSkipsRewrite() throws {
+        let command = "/tmp/notchi-codex-hook.sh"
+        let first = try XCTUnwrap(CodexHookInstaller.upsertHooksJSON(from: nil, command: command))
+        let second = try XCTUnwrap(CodexHookInstaller.upsertHooksJSON(from: first, command: command))
+
+        XCTAssertEqual(first, second)
+    }
+
+    func testUpsertFeatureFlagIsIdempotentSoReinstallSkipsRewrite() {
+        let first = CodexHookInstaller.upsertFeatureFlag(in: nil)
+        let second = CodexHookInstaller.upsertFeatureFlag(in: first)
+
+        XCTAssertEqual(first, second)
+    }
 }

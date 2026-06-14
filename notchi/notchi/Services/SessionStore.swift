@@ -12,8 +12,8 @@ final class SessionStore {
     private(set) var sessions: [ProviderSessionKey: SessionData] = [:]
     private(set) var selectedSessionKey: ProviderSessionKey?
     private var displaySessionNumbersById: [String: Int] = [:]
-    private var resolveCodexMetadata: @Sendable (String) -> CodexThreadMetadata? = { transcriptPath in
-        CodexThreadMetadataResolver.metadata(for: transcriptPath)
+    private var resolveCodexMetadata: @Sendable ([String]) -> [String: CodexThreadMetadata] = { transcriptPaths in
+        CodexThreadMetadataResolver.metadata(forTranscriptPaths: transcriptPaths)
     }
     private var resolveCodexCompactionSignals: @Sendable ([String]) -> [String: CodexCompactionSignal] = { threadIds in
         CodexCompactionSignalResolver.latestSignals(threadIds: threadIds)
@@ -266,14 +266,22 @@ final class SessionStore {
     func resolveCodexThreadMetadata(_ requests: [CodexThreadMetadataRequest]) async -> [CodexThreadMetadataUpdate] {
         let resolver = resolveCodexMetadata
         return await Task.detached(priority: .utility) {
-            requests.map { request in
-                CodexThreadMetadataUpdate(
-                    sessionKey: request.sessionKey,
-                    transcriptPath: request.transcriptPath,
-                    metadata: resolver(request.transcriptPath)
-                )
-            }
+            Self.makeCodexThreadMetadataUpdates(requests: requests, resolver: resolver)
         }.value
+    }
+
+    private nonisolated static func makeCodexThreadMetadataUpdates(
+        requests: [CodexThreadMetadataRequest],
+        resolver: @Sendable ([String]) -> [String: CodexThreadMetadata]
+    ) -> [CodexThreadMetadataUpdate] {
+        let metadataByPath = resolver(requests.map(\.transcriptPath))
+        return requests.map { request in
+            CodexThreadMetadataUpdate(
+                sessionKey: request.sessionKey,
+                transcriptPath: request.transcriptPath,
+                metadata: metadataByPath[request.transcriptPath]
+            )
+        }
     }
 
     func resolveCodexCompactionSignals(_ requests: [CodexCompactionSignalRequest]) async -> [CodexCompactionSignalUpdate] {
@@ -468,13 +476,10 @@ final class SessionStore {
 
 #if DEBUG
     func refreshCodexThreadMetadataForTesting() -> [SessionData] {
-        let updates = codexThreadMetadataRequests().map { request in
-            CodexThreadMetadataUpdate(
-                sessionKey: request.sessionKey,
-                transcriptPath: request.transcriptPath,
-                metadata: resolveCodexMetadata(request.transcriptPath)
-            )
-        }
+        let updates = Self.makeCodexThreadMetadataUpdates(
+            requests: codexThreadMetadataRequests(),
+            resolver: resolveCodexMetadata
+        )
         return applyCodexThreadMetadata(updates)
     }
 
@@ -491,6 +496,18 @@ final class SessionStore {
     }
 
     func setCodexMetadataResolverForTesting(_ resolver: @escaping @Sendable (String) -> CodexThreadMetadata?) {
+        resolveCodexMetadata = { transcriptPaths in
+            var metadataByPath: [String: CodexThreadMetadata] = [:]
+            for transcriptPath in transcriptPaths {
+                metadataByPath[transcriptPath] = resolver(transcriptPath)
+            }
+            return metadataByPath
+        }
+    }
+
+    func setCodexMetadataBatchResolverForTesting(
+        _ resolver: @escaping @Sendable ([String]) -> [String: CodexThreadMetadata]
+    ) {
         resolveCodexMetadata = resolver
     }
 
@@ -499,8 +516,8 @@ final class SessionStore {
     }
 
     func resetTestingHooks() {
-        resolveCodexMetadata = { transcriptPath in
-            CodexThreadMetadataResolver.metadata(for: transcriptPath)
+        resolveCodexMetadata = { transcriptPaths in
+            CodexThreadMetadataResolver.metadata(forTranscriptPaths: transcriptPaths)
         }
         resolveCodexCompactionSignals = { threadIds in
             CodexCompactionSignalResolver.latestSignals(threadIds: threadIds)
@@ -995,20 +1012,63 @@ nonisolated enum CodexThreadMetadataResolver {
         CodexFileSystem.latestSQLiteURL(prefix: "state_")
     }
 
-    static func metadata(for transcriptPath: String) -> CodexThreadMetadata? {
-        let trimmedPath = transcriptPath.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedPath.isEmpty,
+    // WHY: One sqlite3 spawn resolves every tracked session; the monitor loop
+    // calls this on a 5s cadence, so per-session spawns multiply quickly.
+    static func metadata(forTranscriptPaths transcriptPaths: [String]) -> [String: CodexThreadMetadata] {
+        let requestedPaths = transcriptPaths.filter {
+            !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard !requestedPaths.isEmpty,
               let stateURL,
               FileManager.default.fileExists(atPath: stateURL.path) else {
-            return nil
+            return [:]
         }
 
-        let query = "SELECT id, rollout_path, hex(title), archived FROM threads;"
+        let query = threadsQuery(matchingTranscriptPaths: requestedPaths)
         guard let output = CodexFileSystem.runSQLite(query: query, databasePath: stateURL.path) else {
-            return nil
+            return [:]
         }
 
-        return metadata(fromSQLiteOutput: output, matchingTranscriptPath: trimmedPath)
+        return metadata(fromSQLiteOutput: output, matchingTranscriptPaths: requestedPaths)
+    }
+
+    static func metadata(
+        fromSQLiteOutput output: String,
+        matchingTranscriptPaths transcriptPaths: [String]
+    ) -> [String: CodexThreadMetadata] {
+        var metadataByPath: [String: CodexThreadMetadata] = [:]
+        for transcriptPath in transcriptPaths {
+            let trimmedPath = transcriptPath.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmedPath.isEmpty else { continue }
+            metadataByPath[transcriptPath] = metadata(
+                fromSQLiteOutput: output,
+                matchingTranscriptPath: trimmedPath
+            )
+        }
+        return metadataByPath
+    }
+
+    // WHY: Dumping every thread row makes the periodic monitor loop re-parse the
+    // whole table; filtering in SQLite keeps the output to the tracked sessions'
+    // row(s) while still resolving every session in one sqlite invocation.
+    static func threadsQuery(matchingTranscriptPaths transcriptPaths: [String]) -> String {
+        let trimmedPaths = transcriptPaths
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let rolloutLiterals = trimmedPaths.map { "'\(sqlEscaped($0))'" }
+        let threadIdLiterals = trimmedPaths.compactMap(codexThreadId).map { "'\(sqlEscaped($0))'" }
+
+        var conditions = ["rollout_path IN (\(rolloutLiterals.joined(separator: ", ")))"]
+        if !threadIdLiterals.isEmpty {
+            conditions.append("id IN (\(threadIdLiterals.joined(separator: ", ")))")
+        }
+
+        return "SELECT id, rollout_path, hex(title), archived FROM threads " +
+            "WHERE \(conditions.joined(separator: " OR "));"
+    }
+
+    private static func sqlEscaped(_ value: String) -> String {
+        value.replacingOccurrences(of: "'", with: "''")
     }
 
     static func metadata(fromSQLiteOutput output: String, matchingTranscriptPath transcriptPath: String) -> CodexThreadMetadata? {

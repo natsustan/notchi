@@ -41,9 +41,9 @@ final class NotchPanelManager {
 
     private var observerTokens: [NSObjectProtocol] = []
     private var cachedShouldUseCompactIdle = false
+    private var observedHideSpriteWhenIdle = false
     private var pendingHoverExitTask: Task<Void, Never>?
     private var mouseDownMonitor: EventMonitor?
-    private var mouseMoveMonitor: EventMonitor?
 
     private(set) var isExpanded = false
     private(set) var isPinned = false
@@ -64,6 +64,10 @@ final class NotchPanelManager {
         isCollapsedHovered ? Self.makeCollapsedHoverRect(baseRect: collapsedBaseRect) : collapsedBaseRect
     }
 
+    var collapsedTrackingRect: CGRect {
+        Self.makeCollapsedHoverRect(baseRect: notchRect)
+    }
+
     init(
         notificationCenter: NotificationCenter = .default,
         userDefaults: UserDefaults = .standard,
@@ -82,6 +86,7 @@ final class NotchPanelManager {
         self.mouseLocationProvider = mouseLocationProvider
         self.collapsedHoverEnterFeedback = collapsedHoverEnterFeedback
         self.pinToggleFeedback = pinToggleFeedback
+        self.observedHideSpriteWhenIdle = userDefaults.bool(forKey: AppSettings.hideSpriteWhenIdleKey)
 
         if startEventMonitors {
             setupEventMonitors()
@@ -186,7 +191,7 @@ final class NotchPanelManager {
         setCollapsedHovered(true)
     }
 
-    private func handleCollapsedHoverExited() {
+    func handleCollapsedHoverExited() {
         guard !isExpanded, isCollapsedHovered else { return }
         scheduleHoverExit()
     }
@@ -223,6 +228,13 @@ final class NotchPanelManager {
         resyncCollapsedHoverIfNeeded()
     }
 
+    func refreshIdleModeIfHideSpritePreferenceChanged() {
+        let current = userDefaults.bool(forKey: AppSettings.hideSpriteWhenIdleKey)
+        guard current != observedHideSpriteWhenIdle else { return }
+        observedHideSpriteWhenIdle = current
+        refreshIdleMode()
+    }
+
     private func setupObservers() {
         observerTokens.append(
             notificationCenter.addObserver(
@@ -243,7 +255,7 @@ final class NotchPanelManager {
                 queue: nil
             ) { [weak self] _ in
                 Task { @MainActor [weak self] in
-                    self?.refreshIdleMode()
+                    self?.refreshIdleModeIfHideSpritePreferenceChanged()
                 }
             }
         )
@@ -257,14 +269,6 @@ final class NotchPanelManager {
             }
         }
         mouseDownMonitor?.start()
-
-        mouseMoveMonitor = EventMonitor(mask: [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged]) { [weak self] _ in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                self.handleMouseLocationChanged(self.mouseLocationProvider())
-            }
-        }
-        mouseMoveMonitor?.start()
     }
 
     private static func screenLocation(from event: NSEvent) -> CGPoint {

@@ -99,18 +99,27 @@ nonisolated enum CodexUsageSnapshotResolver {
             .max { lhs, rhs in lhs.observedAt < rhs.observedAt }
     }
 
-    static func latestSnapshot(transcriptPath: String) -> CodexUsageSnapshot? {
+    // WHY: Rollout files grow unbounded (>100MB in long sessions) and Codex
+    // appends fresh token_count events near EOF, so the periodic refresh only
+    // needs the file tail; re-reading the whole transcript pegged a core.
+    static let defaultMaxTailBytes = 4 * 1024 * 1024
+
+    static func latestSnapshot(
+        transcriptPath: String,
+        maxTailBytes: Int = defaultMaxTailBytes
+    ) -> CodexUsageSnapshot? {
         let trimmedPath = transcriptPath.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmedPath.isEmpty,
-              let contents = try? String(contentsOfFile: trimmedPath, encoding: .utf8) else {
+              let tail = tailData(forFileAtPath: trimmedPath, maxBytes: maxTailBytes) else {
             return nil
         }
 
         var latestSnapshot: CodexUsageSnapshot?
-        for line in contents.split(separator: "\n", omittingEmptySubsequences: true) {
-            guard line.contains(#""token_count""#),
-                  let data = String(line).data(using: .utf8),
-                  let event = try? JSONDecoder().decode(CodexTokenCountEvent.self, from: data),
+        let decoder = JSONDecoder()
+        let tokenCountMarker = Data(#""token_count""#.utf8)
+        for line in tail.split(separator: UInt8(ascii: "\n")) {
+            guard line.range(of: tokenCountMarker) != nil,
+                  let event = try? decoder.decode(CodexTokenCountEvent.self, from: Data(line)),
                   event.payload?.type == "token_count",
                   let primary = event.payload?.rateLimits?.primary,
                   let observedAt = parseDate(event.timestamp) else {
@@ -130,6 +139,37 @@ nonisolated enum CodexUsageSnapshotResolver {
         }
 
         return latestSnapshot
+    }
+
+    private static func tailData(forFileAtPath path: String, maxBytes: Int) -> Data? {
+        guard let fileHandle = FileHandle(forReadingAtPath: path) else { return nil }
+        defer { try? fileHandle.close() }
+
+        guard let fileSize = try? fileHandle.seekToEnd() else { return nil }
+        let tailOffset = fileSize > UInt64(maxBytes) ? fileSize - UInt64(maxBytes) : 0
+        guard (try? fileHandle.seek(toOffset: tailOffset)) != nil,
+              let data = try? fileHandle.readToEnd() else {
+            return nil
+        }
+
+        guard tailOffset > 0 else { return data }
+
+        // A window that begins right after a newline already starts a whole line,
+        // so only drop the leading fragment when the seek lands mid-line.
+        if tailBeginsOnLineBoundary(fileHandle, tailOffset: tailOffset) {
+            return data
+        }
+
+        guard let firstNewline = data.firstIndex(of: UInt8(ascii: "\n")) else { return nil }
+        return data[data.index(after: firstNewline)...]
+    }
+
+    private static func tailBeginsOnLineBoundary(_ fileHandle: FileHandle, tailOffset: UInt64) -> Bool {
+        guard (try? fileHandle.seek(toOffset: tailOffset - 1)) != nil,
+              let previousByte = try? fileHandle.read(upToCount: 1) else {
+            return false
+        }
+        return previousByte.first == UInt8(ascii: "\n")
     }
 
     private static func parseDate(_ rawValue: String?) -> Date? {

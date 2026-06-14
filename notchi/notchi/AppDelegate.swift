@@ -41,21 +41,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
         guard !isRunningTests else { return }
 
         NSApplication.shared.setActivationPolicy(.accessory)
-        integrationCoordinator.prepareForLaunch()
         setupNotchWindow()
         globalShortcutService.start()
         installMinimizeShortcutGuard()
         observeScreenChanges()
         observeWakeNotifications()
-        startHookServices()
-        startUsageService()
+        startProviderServices()
         startUpdater()
     }
 
-    private func startHookServices() {
-        integrationCoordinator.installHooksIfNeeded()
-        integrationCoordinator.start { event in
-            NotchiStateMachine.shared.handleEvent(event)
+    // WHY: launch preparation and hook installation can run shell probes with
+    // multi-second timeouts, so they must stay off the main thread to keep the
+    // launch animation responsive. Usage polling starts afterwards so its CLI
+    // probes reuse the cached config resolution.
+    private func startProviderServices() {
+        Task.detached(priority: .utility) { [integrationCoordinator] in
+            integrationCoordinator.prepareForLaunch()
+            integrationCoordinator.installHooksIfNeeded()
+            integrationCoordinator.start { event in
+                NotchiStateMachine.shared.handleEvent(event)
+            }
+            await ClaudeUsageService.shared.startPolling()
         }
     }
 
@@ -144,6 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
 
             NotchPanelManager.shared.updateGeometry(for: screen)
             panel.setFrame(windowFrame(for: screen), display: true)
+            panel.contentView?.updateTrackingAreas()
         }
     }
 
@@ -161,10 +168,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
             width: screenFrame.width,
             height: windowHeight
         )
-    }
-
-    @MainActor private func startUsageService() {
-        ClaudeUsageService.shared.startPolling()
     }
 
     private func startUpdater() {

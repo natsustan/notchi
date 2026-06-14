@@ -33,11 +33,7 @@ struct HookInstaller {
         if let bundled = Bundle.main.url(forResource: "notchi-hook", withExtension: "sh") {
             do {
                 let bundledData = try Data(contentsOf: bundled)
-                try bundledData.write(to: hookScript, options: .atomic)
-                try FileManager.default.setAttributes(
-                    [.posixPermissions: 0o755],
-                    ofItemAtPath: hookScript.path
-                )
+                try HookFile.writeScriptIfNeeded(bundledData, to: hookScript)
             } catch {
                 logger.error("Failed to install hook script: \(error.localizedDescription)")
                 return false
@@ -132,6 +128,8 @@ struct HookInstaller {
             logger.error("Failed to serialize settings JSON")
             return false
         }
+
+        guard data != existingData else { return true }
 
         do {
             try data.write(to: settingsURL)

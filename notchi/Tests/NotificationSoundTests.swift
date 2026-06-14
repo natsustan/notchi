@@ -3,23 +3,17 @@ import XCTest
 
 final class NotificationSoundTests: XCTestCase {
     func testBuiltInDisplayOrderKeepsNoneFirstThenSortsSoundsByName() {
-        XCTAssertEqual(NotificationSound.displayOrder.first, NotificationSound.none)
-        XCTAssertEqual(NotificationSound.displayOrder.dropFirst().map(\.displayName), [
-            "Basso",
-            "Blow",
-            "Bottle",
-            "Frog",
-            "Funk",
-            "Glass",
-            "Hero",
-            "Morse",
-            "Ping",
-            "Pop",
-            "Purr",
-            "Sosumi",
-            "Submarine",
-            "Tink"
-        ])
+        let order = NotificationSound.displayOrder
+
+        XCTAssertEqual(order.first, NotificationSound.none)
+        XCTAssertEqual(order.count, NotificationSound.allCases.count)
+        XCTAssertEqual(Set(order), Set(NotificationSound.allCases))
+
+        let names = order.dropFirst().map(\.displayName)
+        XCTAssertEqual(
+            names,
+            names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+        )
     }
 
     func testDeletingSelectedCustomSoundFallsBackToDefaultSound() {

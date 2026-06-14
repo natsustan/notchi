@@ -42,6 +42,7 @@ TEST_ARGS=()
 if [[ "$preset" == "focused" ]]; then
     TEST_ARGS=(
         "-only-testing:Tests/ClaudeUsageServiceTests"
+        "-only-testing:Tests/ClaudeCLIResolverTests"
         "-only-testing:Tests/KeychainManagerTests"
         "-only-testing:Tests/NotchPanelManagerTests"
         "-only-testing:Tests/UsageBarViewTests"

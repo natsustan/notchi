@@ -2,6 +2,7 @@ import AppKit
 
 final class NotchHitTestView: NSView {
     weak var panelManager: NotchPanelManager?
+    private var collapsedHoverTrackingArea: NSTrackingArea?
 
     override func hitTest(_ point: NSPoint) -> NSView? {
         guard let window, let manager = panelManager else { return nil }
@@ -9,5 +10,50 @@ final class NotchHitTestView: NSView {
         let activeRect = manager.isExpanded ? manager.panelRect : manager.activeCollapsedRect
         guard activeRect.contains(screenPoint) else { return nil }
         return super.hitTest(point)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        updateTrackingAreas()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+
+        if let collapsedHoverTrackingArea {
+            removeTrackingArea(collapsedHoverTrackingArea)
+            self.collapsedHoverTrackingArea = nil
+        }
+
+        guard let window, let manager = panelManager else { return }
+        guard manager.notchSize != .zero else { return }
+        let screenRect = manager.collapsedTrackingRect
+        guard !screenRect.isEmpty else { return }
+
+        let viewRect = convert(window.convertFromScreen(screenRect), from: nil)
+        let trackingArea = NSTrackingArea(
+            rect: viewRect,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeAlways, .enabledDuringMouseDrag],
+            owner: self
+        )
+        addTrackingArea(trackingArea)
+        collapsedHoverTrackingArea = trackingArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        forwardMouseLocation(event)
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        forwardMouseLocation(event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        panelManager?.handleCollapsedHoverExited()
+    }
+
+    private func forwardMouseLocation(_ event: NSEvent) {
+        guard let window, let manager = panelManager else { return }
+        manager.handleMouseLocationChanged(window.convertPoint(toScreen: event.locationInWindow))
     }
 }
