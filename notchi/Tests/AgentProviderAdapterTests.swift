@@ -32,7 +32,7 @@ final class AgentProviderAdapterTests: XCTestCase {
         nonisolated func normalize(_ envelope: AgentHookEnvelope) -> HookEvent? { nil }
     }
 
-    private final class HooksPreferenceRecorder: @unchecked Sendable {
+    private nonisolated final class HooksPreferenceRecorder: @unchecked Sendable {
         private let lock = NSLock()
         private var enabledByProvider: [AgentProvider: Bool] = [:]
 
