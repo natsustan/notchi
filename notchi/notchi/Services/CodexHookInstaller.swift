@@ -68,7 +68,13 @@ struct CodexHookInstaller {
         try? FileManager.default.removeItem(at: hookScriptURL)
 
         let existingData = try? Data(contentsOf: hooksJSONURL)
-        guard let data = removeManagedHooksJSON(from: existingData) else { return }
+        guard let data = removeManagedHooksJSON(from: existingData) else {
+            if let existingData, !existingData.isEmpty,
+               (try? JSONSerialization.jsonObject(with: existingData)) == nil {
+                codexHookLogger.error("Skipped pruning Codex hooks.json on uninstall: file is not valid JSON; stale hook references may remain")
+            }
+            return
+        }
 
         do {
             try data.write(to: hooksJSONURL)

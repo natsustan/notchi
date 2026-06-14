@@ -98,4 +98,46 @@ final class CodexHookInstallerTests: XCTestCase {
 
         XCTAssertEqual(first, second)
     }
+
+    func testRemoveManagedHooksJSONKeepsSiblingHookInSameEntry() throws {
+        let existing = try JSONSerialization.data(withJSONObject: [
+            "hooks": [
+                "SessionStart": [
+                    [
+                        "hooks": [
+                            ["type": "command", "command": "/tmp/notchi-codex-hook.sh"],
+                            ["type": "command", "command": "echo other"],
+                        ],
+                    ],
+                ],
+            ],
+        ])
+
+        let updated = try XCTUnwrap(CodexHookInstaller.removeManagedHooksJSON(from: existing))
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: updated) as? [String: Any])
+        let hooks = try XCTUnwrap(json["hooks"] as? [String: Any])
+        let sessionStart = try XCTUnwrap(hooks["SessionStart"] as? [[String: Any]])
+        let entryHooks = try XCTUnwrap(sessionStart.first?["hooks"] as? [[String: Any]])
+
+        XCTAssertEqual(sessionStart.count, 1)
+        XCTAssertEqual(entryHooks.count, 1)
+        XCTAssertEqual(entryHooks.first?["command"] as? String, "echo other")
+        XCTAssertFalse(CodexHookInstaller.isHookInstalled(in: updated))
+    }
+
+    func testRemoveManagedHooksJSONDropsHooksKeyWhenOnlyNotchiHooksExist() throws {
+        let existing = try XCTUnwrap(CodexHookInstaller.upsertHooksJSON(from: nil, command: "/tmp/notchi-codex-hook.sh"))
+
+        let updated = try XCTUnwrap(CodexHookInstaller.removeManagedHooksJSON(from: existing))
+        let json = try XCTUnwrap(try JSONSerialization.jsonObject(with: updated) as? [String: Any])
+
+        XCTAssertNil(json["hooks"])
+        XCTAssertFalse(CodexHookInstaller.isHookInstalled(in: updated))
+    }
+
+    func testRemoveManagedHooksJSONReturnsNilWhenNoHooksPresent() throws {
+        let existing = try JSONSerialization.data(withJSONObject: ["someOtherKey": "value"])
+
+        XCTAssertNil(CodexHookInstaller.removeManagedHooksJSON(from: existing))
+    }
 }
