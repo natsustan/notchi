@@ -53,6 +53,14 @@ final class SessionStore {
         return sortedSessions.first
     }
 
+    func latestSession(for provider: AgentProvider) -> SessionData? {
+        sortedSessions.first { $0.provider == provider }
+    }
+
+    func latestSession(excluding provider: AgentProvider?) -> SessionData? {
+        sortedSessions.first { $0.provider != provider }
+    }
+
     func selectSession(_ sessionKey: ProviderSessionKey) {
         guard sessions[sessionKey] != nil else { return }
         selectedSessionKey = sessionKey
