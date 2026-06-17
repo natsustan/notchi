@@ -265,6 +265,13 @@ struct NotchContentView: View {
         max(0, notchSize.height - 12) + 24
     }
 
+    private var usageRingPercentage: Int? {
+        guard AppSettings.isUsageEnabled,
+              let usage = usageService.currentUsage,
+              !usage.isExpired else { return nil }
+        return usage.usagePercentage
+    }
+
     private var compactContentWidth: CGFloat {
         max(0, panelManager.compactNotchRect.width - (cornerRadiusInsets.closed.bottom * 2))
     }
@@ -554,8 +561,12 @@ struct NotchContentView: View {
                 .frame(width: compactContentWidth)
         } else {
             HStack(spacing: 0) {
+                usageRing
+                    .frame(width: sideWidth)
+                    .offset(x: -(sideWidth / 4 + cornerRadiusInsets.closed.top / 2))
+
                 Color.clear
-                    .frame(width: notchSize.width - cornerRadiusInsets.closed.top)
+                    .frame(width: notchSize.width - cornerRadiusInsets.closed.top - sideWidth)
 
                 headerSprites
                     .offset(x: collapsedHeaderSpriteOffsetX, y: collapsedHeaderSpriteOffsetY)
@@ -564,6 +575,15 @@ struct NotchContentView: View {
                     .blur(radius: collapsedHeaderSpriteVisuals.blur)
                     .animation(collapsedHeaderSpriteVisibilityAnimation, value: isExpanded)
             }
+        }
+    }
+
+    @ViewBuilder
+    private var usageRing: some View {
+        if let usageRingPercentage {
+            UsageRingView(percentage: usageRingPercentage)
+                .opacity(collapsedHeaderSpriteVisuals.opacity)
+                .animation(collapsedHeaderSpriteVisibilityAnimation, value: isExpanded)
         }
     }
 
