@@ -72,18 +72,18 @@ final class UsageBarViewTests: XCTestCase {
         XCTAssertTrue(view.shouldShowRecoveryButton)
     }
 
-    func testRecoveryButtonShowsForWaitForClaudeCodeState() {
+    func testRecoveryButtonHiddenForWaitForClaudeCodeState() {
         let view = UsageBarView(
-            usage: QuotaPeriod(utilization: 42, resetDate: Date(timeIntervalSince1970: 4_102_444_800)),
+            usage: nil,
             isLoading: false,
-            error: nil,
-            statusMessage: "Start Claude Code to track usage",
-            isStale: true,
+            error: "Start a Claude Code session to track usage",
+            statusMessage: nil,
+            isStale: false,
             recoveryAction: .waitForClaudeCode,
             isEnabled: true
         )
 
-        XCTAssertTrue(view.shouldShowRecoveryButton)
+        XCTAssertFalse(view.shouldShowRecoveryButton)
     }
 
     func testRecoveryButtonShowsForRetryStateWithoutUsage() {

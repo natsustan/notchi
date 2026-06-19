@@ -51,7 +51,12 @@ struct UsageBarView: View {
     }
 
     var shouldShowRecoveryButton: Bool {
-        recoveryAction != .none
+        switch recoveryAction {
+        case .retry, .reconnect:
+            return true
+        case .waitForClaudeCode, .none:
+            return false
+        }
     }
 
     var recoveryActionLabel: String {
