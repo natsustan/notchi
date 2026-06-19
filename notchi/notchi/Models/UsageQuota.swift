@@ -3,11 +3,13 @@ import Foundation
 nonisolated struct UsageResponse: Decodable {
     let fiveHour: QuotaPeriod?
     let sevenDay: QuotaPeriod?
+    let sevenDaySonnet: QuotaPeriod?
     let extraUsage: ExtraUsage?
 
     enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
+        case sevenDaySonnet = "seven_day_sonnet"
         case extraUsage = "extra_usage"
     }
 }

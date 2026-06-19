@@ -10,6 +10,7 @@ struct SessionSpriteView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var stateMirrorKey: String?
     @State private var stateMirrored = false
+    @State private var animatedVerticalOffset: CGFloat = 0
 
     private var bobAmplitude: CGFloat {
         guard !reduceMotion, state.bobAmplitude > 0 else { return 0 }
@@ -19,6 +20,13 @@ struct SessionSpriteView: View {
     private var trembleAmplitude: CGFloat {
         guard !reduceMotion, state.emotion == .sob else { return 0 }
         return Self.sobTrembleAmplitude
+    }
+
+    private var spriteVerticalOffset: CGFloat {
+        switch state.task {
+        case .idle, .sleeping, .compacting: -3
+        default: 0
+        }
     }
 
     private static let sobTrembleAmplitude: CGFloat = 0.2
@@ -41,9 +49,20 @@ struct SessionSpriteView: View {
                 x: trembleOffset(at: timeline.date, amplitude: trembleAmplitude),
                 y: bobOffset(at: timeline.date, duration: state.bobDuration, amplitude: bobAmplitude)
             )
+            .offset(y: animatedVerticalOffset)
         }
-        .onAppear(perform: updateStateMirroring)
+        .onAppear {
+            updateStateMirroring()
+            animatedVerticalOffset = spriteVerticalOffset
+        }
         .onChange(of: mirrorKey) { _, _ in updateStateMirroring() }
+        .onChange(of: spriteVerticalOffset) { _, newValue in
+            if reduceMotion {
+                animatedVerticalOffset = newValue
+            } else {
+                withAnimation(.easeInOut(duration: 0.2)) { animatedVerticalOffset = newValue }
+            }
+        }
     }
 
     private func spriteSheetPresentation(at date: Date) -> SpriteSheetPresentation {

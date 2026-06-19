@@ -37,7 +37,7 @@ extension ClaudeUsageServiceTests {
         XCTAssertEqual(environmentTokenCalls, 1)
         XCTAssertEqual(getCachedTokenCalls, [false])
         XCTAssertEqual(getOAuthCredentialCalls, [false])
-        XCTAssertEqual(service.error, "Claude authentication needs attention. Tap to reconnect.")
+        XCTAssertEqual(service.error, "Claude authentication needs attention.")
         XCTAssertEqual(service.recoveryAction, .reconnect)
         XCTAssertTrue(scheduler.intervals.isEmpty)
         XCTAssertFalse(AppSettings.isUsageEnabled)
@@ -171,7 +171,7 @@ extension ClaudeUsageServiceTests {
         XCTAssertFalse(AppSettings.isUsageEnabled)
         XCTAssertFalse(service.isConnected)
         XCTAssertNil(service.error)
-        XCTAssertEqual(service.statusMessage, "Claude authentication needs attention. Tap to reconnect.")
+        XCTAssertEqual(service.statusMessage, "Claude authentication needs attention.")
         XCTAssertTrue(service.isUsageStale)
         XCTAssertEqual(service.recoveryAction, .reconnect)
         XCTAssertEqual(service.currentUsage?.usagePercentage, 42)
@@ -681,7 +681,7 @@ extension ClaudeUsageServiceTests {
         await service.performFetch(with: "token", userInitiated: true)
 
         XCTAssertFalse(fetchCalled)
-        XCTAssertEqual(service.error, "Claude authentication needs attention. Tap to reconnect.")
+        XCTAssertEqual(service.error, "Claude authentication needs attention.")
         XCTAssertEqual(service.recoveryAction, .reconnect)
         XCTAssertTrue(scheduler.intervals.isEmpty)
     }

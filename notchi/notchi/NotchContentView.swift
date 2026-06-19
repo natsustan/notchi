@@ -38,6 +38,10 @@ private enum LaunchWaveTiming {
 }
 
 struct NotchContentView: View {
+    private enum NotchSide {
+        case left, right
+    }
+
     private struct SpriteHandoff {
         enum Direction {
             case expanding
@@ -85,8 +89,11 @@ struct NotchContentView: View {
     var haptics: HapticService = .shared
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @ObservedObject private var updateManager = UpdateManager.shared
+    @AppStorage(AppSettings.notchLeftContentKey) private var leftContentRaw = NotchSlotContent.ring.rawValue
+    @AppStorage(AppSettings.notchRightContentKey) private var rightContentRaw = NotchSlotContent.latest.rawValue
     @State private var showingPanelSettings = false
     @State private var showingPanelSettingsDetail = false
+    @State private var showingUsageDetail = false
     @State private var showingSessionActivity = false
     @State private var isMuted = AppSettings.isMuted
     @State private var isActivityCollapsed = false
@@ -114,31 +121,21 @@ struct NotchContentView: View {
     private var isExpanded: Bool { panelManager.isExpanded }
     private var collapsedMode: NotchPanelManager.CollapsedMode { panelManager.collapsedMode }
     private var isCompactIdle: Bool { !isExpanded && collapsedMode == .compactIdle }
-    private var headerSpriteContent: HeaderSpriteContent? {
-        Self.resolveHeaderSpriteContent(
-            activeSessionState: activeSession?.state,
-            activeSessionId: activeSession?.id,
-            launchWave: launchWave,
-            isCompactIdle: isCompactIdle,
-            launchSpriteFamily: launchSpriteFamily
-        )
+    private var leftContent: NotchSlotContent {
+        NotchSlotContent(rawValue: leftContentRaw) ?? .ring
     }
 
-    static func resolveHeaderSpriteContent(
-        activeSessionState: NotchiState?,
-        activeSessionId: String? = nil,
-        launchWave: LaunchWave?,
-        isCompactIdle: Bool,
-        launchSpriteFamily: NotchiSpriteFamily
-    ) -> HeaderSpriteContent? {
-        if let activeSessionState {
-            return HeaderSpriteContent(
-                state: activeSessionState,
-                mirrorSeed: activeSessionId ?? "active-header-sprite"
-            )
-        }
+    private var rightContent: NotchSlotContent {
+        NotchSlotContent(rawValue: rightContentRaw) ?? .latest
+    }
 
-        if let launchWave {
+    private func spriteContent(for content: NotchSlotContent, side: NotchSide) -> HeaderSpriteContent? {
+        let excluded = (side == .left ? rightContent : leftContent).spriteProvider
+        if let session = sessionForSprite(content, excluding: excluded) {
+            return HeaderSpriteContent(state: session.state, mirrorSeed: session.id)
+        }
+        if let launchWave,
+           contentAcceptsSprite(content, spriteFamily: launchWave.state.spriteFamily, excluding: excluded) {
             return HeaderSpriteContent(
                 state: launchWave.state,
                 mirrorSeed: "launch-wave-\(launchWave.state.spriteFamily.rawValue)",
@@ -148,12 +145,29 @@ struct NotchContentView: View {
                 xOffset: LaunchWaveTiming.horizontalOffset
             )
         }
+        return nil
+    }
 
-        guard !isCompactIdle else { return nil }
-        return HeaderSpriteContent(
-            state: NotchiState(task: .idle, spriteFamily: launchSpriteFamily),
-            mirrorSeed: "fallback-\(launchSpriteFamily.rawValue)"
-        )
+    private func sessionForSprite(_ content: NotchSlotContent, excluding excluded: AgentProvider?) -> SessionData? {
+        switch content {
+        case .claude: sessionStore.latestSession(for: .claude)
+        case .codex: sessionStore.latestSession(for: .codex)
+        case .latest: sessionStore.latestSession(excluding: excluded)
+        case .nothing, .ring: nil
+        }
+    }
+
+    private func contentAcceptsSprite(
+        _ content: NotchSlotContent,
+        spriteFamily: NotchiSpriteFamily,
+        excluding excluded: AgentProvider?
+    ) -> Bool {
+        switch content {
+        case .claude: spriteFamily == AgentProvider.claude.spriteFamily
+        case .codex: spriteFamily == AgentProvider.codex.spriteFamily
+        case .latest: spriteFamily != excluded?.spriteFamily
+        case .nothing, .ring: false
+        }
     }
 
     static func shouldRenderGrassIsland(
@@ -249,6 +263,26 @@ struct NotchContentView: View {
         return baseOffset + 3
     }
 
+    private func ringOffsetX(side: NotchSide) -> CGFloat {
+        var magnitude = sideWidth / 4 + cornerRadiusInsets.closed.top
+        if !isExpanded && panelManager.isCollapsedHovered {
+            magnitude += 6
+        }
+        return side == .left ? -magnitude : magnitude
+    }
+
+    private func spriteOffsetX(side: NotchSide) -> CGFloat {
+        side == .left ? -collapsedHeaderSpriteOffsetX : collapsedHeaderSpriteOffsetX
+    }
+
+    private var collapsedUsageRingOffsetY: CGFloat {
+        !isExpanded && panelManager.isCollapsedHovered ? 2 : -1
+    }
+
+    private var isLaunchWaveActive: Bool {
+        launchWave != nil || isLaunchWavePreparing
+    }
+
     private var collapsedHeaderSpriteVisuals: (opacity: Double, blur: CGFloat) {
         guard let activeSession, let spriteHandoff, spriteHandoff.sessionId == activeSession.id else {
             return (opacity: isExpanded ? 0 : 1, blur: 0)
@@ -263,6 +297,14 @@ struct NotchContentView: View {
 
     private var sideWidth: CGFloat {
         max(0, notchSize.height - 12) + 24
+    }
+
+    private var usageRingPercentage: Int? {
+        guard AppSettings.isUsageEnabled,
+              sessionStore.activeSessionCount > 0,
+              let usage = usageService.currentUsage,
+              !usage.isExpired else { return nil }
+        return usage.usagePercentage
     }
 
     private var compactContentWidth: CGFloat {
@@ -295,6 +337,7 @@ struct NotchContentView: View {
 
     private var shouldShowBackButton: Bool {
         showingPanelSettings ||
+        (showingUsageDetail && !isActivityCollapsed) ||
         (sessionStore.activeSessionCount >= 2 && showingSessionActivity)
     }
 
@@ -419,6 +462,7 @@ struct NotchContentView: View {
                 showingPanelSettings = false
                 showingPanelSettingsDetail = false
                 showingSessionActivity = false
+                showingUsageDetail = false
                 hoveredSessionId = nil
             }
         }
@@ -444,6 +488,7 @@ struct NotchContentView: View {
                         showingSettings: $showingPanelSettings,
                         showingSettingsDetail: $showingPanelSettingsDetail,
                         showingSessionActivity: $showingSessionActivity,
+                        showingUsageDetail: $showingUsageDetail,
                         isActivityCollapsed: $isActivityCollapsed,
                         hoveredSessionId: $hoveredSessionId
                     )
@@ -527,6 +572,8 @@ struct NotchContentView: View {
             } else {
                 showingPanelSettings = false
             }
+        } else if showingUsageDetail {
+            showingUsageDetail = false
         } else if showingSessionActivity {
             showingSessionActivity = false
             sessionStore.clearSelectedSession()
@@ -534,6 +581,7 @@ struct NotchContentView: View {
     }
 
     private func selectGrassSession(_ sessionId: String) {
+        showingUsageDetail = false
         guard sessionStore.activeSessionCount >= 2 else { return }
 
         let shouldPlayHaptic = sessionStore.selectedSessionId != sessionId || !showingSessionActivity
@@ -554,31 +602,61 @@ struct NotchContentView: View {
                 .frame(width: compactContentWidth)
         } else {
             HStack(spacing: 0) {
-                Color.clear
-                    .frame(width: notchSize.width - cornerRadiusInsets.closed.top)
+                slotView(leftContent, side: .left)
 
-                headerSprites
-                    .offset(x: collapsedHeaderSpriteOffsetX, y: collapsedHeaderSpriteOffsetY)
-                    .frame(width: sideWidth)
-                    .opacity(collapsedHeaderSpriteVisuals.opacity)
-                    .blur(radius: collapsedHeaderSpriteVisuals.blur)
-                    .animation(collapsedHeaderSpriteVisibilityAnimation, value: isExpanded)
+                Color.clear
+                    .frame(width: notchSize.width - cornerRadiusInsets.closed.top - sideWidth)
+
+                slotView(rightContent, side: .right)
             }
         }
     }
 
     @ViewBuilder
-    private var headerSprites: some View {
-        if let headerSpriteContent {
+    private func slotView(_ content: NotchSlotContent, side: NotchSide) -> some View {
+        switch content {
+        case .nothing:
+            Color.clear.frame(width: sideWidth)
+        case .ring:
+            ringSlot(side: side)
+        case .latest, .claude, .codex:
+            spriteSlot(content: spriteContent(for: content, side: side), side: side)
+        }
+    }
+
+    @ViewBuilder
+    private func ringSlot(side: NotchSide) -> some View {
+        if let usageRingPercentage, !isLaunchWaveActive {
+            UsageRingView(percentage: usageRingPercentage)
+                .opacity(collapsedHeaderSpriteVisuals.opacity)
+                .animation(collapsedHeaderSpriteVisibilityAnimation, value: isExpanded)
+                .frame(width: sideWidth)
+                .scaleEffect(collapsedHeaderSpriteScale, anchor: .bottom)
+                .offset(x: ringOffsetX(side: side), y: collapsedUsageRingOffsetY)
+        } else {
+            Color.clear.frame(width: sideWidth)
+        }
+    }
+
+    @ViewBuilder
+    private func spriteSlot(content: HeaderSpriteContent?, side: NotchSide) -> some View {
+        if let content {
             SessionSpriteView(
-                state: headerSpriteContent.state,
+                state: content.state,
                 isPrimarySprite: true,
-                mirrorSeed: headerSpriteContent.mirrorSeed,
-                animationStartDate: headerSpriteContent.startedAt,
-                repeatsAnimation: headerSpriteContent.repeatsAnimation
+                mirrorSeed: content.mirrorSeed,
+                animationStartDate: content.startedAt,
+                repeatsAnimation: content.repeatsAnimation
             )
-            .scaleEffect(collapsedHeaderSpriteScale * headerSpriteContent.scale, anchor: .bottom)
-            .offset(x: headerSpriteContent.xOffset)
+            .scaleEffect(collapsedHeaderSpriteScale * content.scale, anchor: .bottom)
+            .offset(x: content.xOffset)
+            .offset(x: spriteOffsetX(side: side), y: collapsedHeaderSpriteOffsetY)
+            .frame(width: sideWidth)
+            .opacity(collapsedHeaderSpriteVisuals.opacity)
+            .blur(radius: collapsedHeaderSpriteVisuals.blur)
+            .animation(collapsedHeaderSpriteVisibilityAnimation, value: isExpanded)
+        } else {
+            Color.clear.frame(width: sideWidth)
         }
     }
 

@@ -44,7 +44,7 @@ final class UsageBarViewTests: XCTestCase {
         XCTAssertFalse(view.shouldShowConnectPlaceholder)
     }
 
-    func testUsagePresentRetryStateIsNotTappable() {
+    func testRecoveryButtonShowsForRetryStateWithUsagePresent() {
         let view = UsageBarView(
             usage: QuotaPeriod(utilization: 42, resetDate: Date(timeIntervalSince1970: 4_102_444_800)),
             isLoading: false,
@@ -55,39 +55,38 @@ final class UsageBarViewTests: XCTestCase {
             isEnabled: true
         )
 
-        XCTAssertFalse(view.shouldAllowTapAction)
+        XCTAssertTrue(view.shouldShowRecoveryButton)
     }
 
-    func testUsagePresentReconnectStateRemainsTappable() {
+    func testRecoveryButtonShowsForReconnectStateWithUsagePresent() {
         let view = UsageBarView(
             usage: QuotaPeriod(utilization: 42, resetDate: Date(timeIntervalSince1970: 4_102_444_800)),
             isLoading: false,
             error: nil,
-            statusMessage: "Tap to reconnect Claude Code",
+            statusMessage: "Reconnect Claude Code",
             isStale: true,
             recoveryAction: .reconnect,
             isEnabled: true
         )
 
-        XCTAssertTrue(view.shouldAllowTapAction)
+        XCTAssertTrue(view.shouldShowRecoveryButton)
     }
 
-    func testUsagePresentWaitForClaudeCodeStateRemainsTappableWithoutRetryHint() {
+    func testRecoveryButtonHiddenForWaitForClaudeCodeState() {
         let view = UsageBarView(
-            usage: QuotaPeriod(utilization: 42, resetDate: Date(timeIntervalSince1970: 4_102_444_800)),
+            usage: nil,
             isLoading: false,
-            error: nil,
-            statusMessage: "Start Claude Code to track usage",
-            isStale: true,
+            error: "Start a Claude Code session to track usage",
+            statusMessage: nil,
+            isStale: false,
             recoveryAction: .waitForClaudeCode,
             isEnabled: true
         )
 
-        XCTAssertNil(view.actionHint)
-        XCTAssertTrue(view.shouldAllowTapAction)
+        XCTAssertFalse(view.shouldShowRecoveryButton)
     }
 
-    func testNoUsageRetryStateStillShowsTapHint() {
+    func testRecoveryButtonShowsForRetryStateWithoutUsage() {
         let view = UsageBarView(
             usage: nil,
             isLoading: false,
@@ -98,11 +97,65 @@ final class UsageBarViewTests: XCTestCase {
             isEnabled: true
         )
 
-        XCTAssertEqual(view.actionHint, "(tap to retry)")
-        XCTAssertTrue(view.shouldAllowTapAction)
+        XCTAssertTrue(view.shouldShowRecoveryButton)
     }
 
-    func testNoUsageReconnectStateRemainsTappableWithoutActionHint() {
+    func testRecoveryActionLabelMatchesRecoveryAction() {
+        func label(for action: ClaudeUsageRecoveryAction) -> String {
+            UsageBarView(
+                usage: nil,
+                isLoading: false,
+                error: nil,
+                statusMessage: nil,
+                isStale: false,
+                recoveryAction: action,
+                isEnabled: true
+            ).recoveryActionLabel
+        }
+
+        XCTAssertEqual(label(for: .retry), "Retry")
+        XCTAssertEqual(label(for: .reconnect), "Reconnect")
+        XCTAssertEqual(label(for: .waitForClaudeCode), "Open Claude Code")
+    }
+
+    func testRecoveryButtonHiddenWhenNoRecoveryAction() {
+        let view = UsageBarView(
+            usage: QuotaPeriod(utilization: 42, resetDate: Date(timeIntervalSince1970: 4_102_444_800)),
+            isLoading: false,
+            error: nil,
+            statusMessage: nil,
+            isStale: false,
+            recoveryAction: .none,
+            isEnabled: true
+        )
+
+        XCTAssertFalse(view.shouldShowRecoveryButton)
+    }
+
+    func testRetryRecoveryActionInvokesOnRetry() {
+        var retried = false
+        var connected = false
+        let view = UsageBarView(
+            usage: nil,
+            isLoading: false,
+            error: "Rate limited, retrying in 120s",
+            statusMessage: nil,
+            isStale: false,
+            recoveryAction: .retry,
+            isEnabled: true,
+            onConnect: { connected = true },
+            onRetry: { retried = true }
+        )
+
+        view.performRecoveryAction()
+
+        XCTAssertTrue(retried)
+        XCTAssertFalse(connected)
+    }
+
+    func testReconnectRecoveryActionInvokesOnConnect() {
+        var retried = false
+        var connected = false
         let view = UsageBarView(
             usage: nil,
             isLoading: false,
@@ -110,26 +163,15 @@ final class UsageBarViewTests: XCTestCase {
             statusMessage: nil,
             isStale: false,
             recoveryAction: .reconnect,
-            isEnabled: true
+            isEnabled: true,
+            onConnect: { connected = true },
+            onRetry: { retried = true }
         )
 
-        XCTAssertNil(view.actionHint)
-        XCTAssertTrue(view.shouldAllowTapAction)
-    }
+        view.performRecoveryAction()
 
-    func testNoUsageWaitForClaudeCodeStateRemainsTappableWithoutActionHint() {
-        let view = UsageBarView(
-            usage: nil,
-            isLoading: false,
-            error: "Start Claude Code to track usage",
-            statusMessage: nil,
-            isStale: false,
-            recoveryAction: .waitForClaudeCode,
-            isEnabled: true
-        )
-
-        XCTAssertNil(view.actionHint)
-        XCTAssertTrue(view.shouldAllowTapAction)
+        XCTAssertTrue(connected)
+        XCTAssertFalse(retried)
     }
 
     func testExtraUsageIndicatorOnlyShowsWhenActivelyUsingExtraUsage() {

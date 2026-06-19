@@ -2,19 +2,42 @@ import Foundation
 
 nonisolated struct CodexUsageSnapshot: Sendable, Equatable {
     let usage: QuotaPeriod
+    let weeklyUsage: QuotaPeriod?
     let observedAt: Date
 }
 
 nonisolated struct CodexUsageServiceDependencies: Sendable {
     var resolveUsage: @Sendable ([String]) -> CodexUsageSnapshot?
+    var fetchAPIUsage: @Sendable () async -> CodexAPIUsage? = { nil }
     var now: @Sendable () -> Date
 
     static let live = CodexUsageServiceDependencies(
         resolveUsage: { transcriptPaths in
             CodexUsageSnapshotResolver.latestSnapshot(transcriptPaths: transcriptPaths)
         },
+        fetchAPIUsage: { await CodexUsageAPIClient.fetchLive() },
         now: { Date() }
     )
+}
+
+nonisolated enum CodexUsageAPIClient {
+    static func fetchLive() async -> CodexAPIUsage? {
+        guard let data = try? Data(contentsOf: CodexUsageAPI.authFileURL()),
+              let auth = CodexAPIAuth.load(from: data),
+              !CodexUsageAPI.isAccessTokenExpired(auth.accessToken, now: Date()) else {
+            return nil
+        }
+
+        let request = CodexUsageAPI.makeRequest(auth: auth)
+        guard let (body, response) = try? await URLSession.shared.data(for: request),
+              let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode),
+              let decoded = try? JSONDecoder().decode(CodexUsageAPIResponse.self, from: body) else {
+            return nil
+        }
+
+        return CodexUsageAPI.usage(from: decoded, now: Date())
+    }
 }
 
 @MainActor
@@ -23,11 +46,17 @@ final class CodexUsageService {
     static let shared = CodexUsageService()
 
     var currentUsage: QuotaPeriod?
+    var currentWeeklyUsage: QuotaPeriod?
+    var currentReviewsUsage: QuotaPeriod?
+    var currentExtraCreditsUSD: Double?
     var isUsageStale = false
     var statusMessage: String?
     var lastObservedAt: Date?
 
     private static let staleObservationInterval: TimeInterval = 15 * 60
+
+    private static let apiUsageRefreshInterval: TimeInterval = 60
+    private var lastAPIUsageFetchAt: Date?
 
     private let dependencies: CodexUsageServiceDependencies
 
@@ -48,10 +77,28 @@ final class CodexUsageService {
         }.value
 
         apply(snapshot)
+        await refreshAPIUsage()
+    }
+
+    private func refreshAPIUsage() async {
+        let now = dependencies.now()
+        if let last = lastAPIUsageFetchAt, now.timeIntervalSince(last) < Self.apiUsageRefreshInterval {
+            return
+        }
+        lastAPIUsageFetchAt = now
+
+        if let apiUsage = await dependencies.fetchAPIUsage() {
+            currentReviewsUsage = apiUsage.reviews
+            currentExtraCreditsUSD = apiUsage.creditsBalance.map { $0 * CodexUsageAPI.creditUSDRate }
+        }
     }
 
     func clear() {
         currentUsage = nil
+        currentWeeklyUsage = nil
+        currentReviewsUsage = nil
+        currentExtraCreditsUSD = nil
+        lastAPIUsageFetchAt = nil
         isUsageStale = false
         statusMessage = nil
         lastObservedAt = nil
@@ -62,6 +109,7 @@ final class CodexUsageService {
 
         if let snapshot, isUsageStillValid(snapshot.usage, now: now) {
             currentUsage = snapshot.usage
+            currentWeeklyUsage = snapshot.weeklyUsage
             lastObservedAt = snapshot.observedAt
             isUsageStale = now.timeIntervalSince(snapshot.observedAt) > Self.staleObservationInterval
             statusMessage = nil
@@ -126,11 +174,19 @@ nonisolated enum CodexUsageSnapshotResolver {
                 continue
             }
 
+            let weeklyUsage = event.payload?.rateLimits?.secondary.map { secondary in
+                QuotaPeriod(
+                    utilization: secondary.usedPercent.rounded(),
+                    resetDate: Date(timeIntervalSince1970: secondary.resetsAt)
+                )
+            }
+
             let snapshot = CodexUsageSnapshot(
                 usage: QuotaPeriod(
                     utilization: primary.usedPercent.rounded(),
                     resetDate: Date(timeIntervalSince1970: primary.resetsAt)
                 ),
+                weeklyUsage: weeklyUsage,
                 observedAt: observedAt
             )
             if latestSnapshot.map({ observedAt > $0.observedAt }) ?? true {
@@ -194,6 +250,7 @@ private nonisolated struct CodexTokenCountEvent: Decodable {
 
     struct RateLimits: Decodable {
         let primary: Limit?
+        let secondary: Limit?
     }
 
     struct Limit: Decodable {

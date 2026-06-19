@@ -86,9 +86,51 @@ enum EmotionAnalysisModel: String, CaseIterable, Identifiable {
     }
 }
 
+enum NotchSlotContent: String, CaseIterable, Identifiable {
+    case latest
+    case ring
+    case claude
+    case codex
+    case nothing
+
+    var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .latest: "Latest Session"
+        case .ring: "Usage"
+        case .claude: "Claude"
+        case .codex: "Codex"
+        case .nothing: "Nothing"
+        }
+    }
+
+    var spriteProvider: AgentProvider? {
+        switch self {
+        case .claude: .claude
+        case .codex: .codex
+        case .nothing, .ring, .latest: nil
+        }
+    }
+
+    var isSprite: Bool {
+        switch self {
+        case .latest, .claude, .codex: true
+        case .nothing, .ring: false
+        }
+    }
+
+    static func conflict(_ a: NotchSlotContent, _ b: NotchSlotContent) -> Bool {
+        guard a != .nothing, b != .nothing else { return false }
+        return a == b || (a.isSprite && b.isSprite && (a == .latest || b == .latest))
+    }
+}
+
 struct AppSettings {
     static let hideSpriteWhenIdleKey = "hideSpriteWhenIdle"
     static let panelToggleShortcutKey = "panelToggleShortcut"
+    static let notchLeftContentKey = "notchLeftContent"
+    static let notchRightContentKey = "notchRightContent"
 
     private static let notificationSoundKey = "notificationSound"
     private static let notificationSoundSelectionKey = "notificationSoundSelection"
@@ -123,6 +165,46 @@ struct AppSettings {
     static var isUsageEnabled: Bool {
         get { UserDefaults.standard.bool(forKey: isUsageEnabledKey) }
         set { UserDefaults.standard.set(newValue, forKey: isUsageEnabledKey) }
+    }
+
+    static var notchLeftContent: NotchSlotContent {
+        get { NotchSlotContent(rawValue: UserDefaults.standard.string(forKey: notchLeftContentKey) ?? "") ?? .ring }
+        set {
+            writeNotchSlot(
+                newValue,
+                previous: notchLeftContent,
+                other: notchRightContent,
+                key: notchLeftContentKey,
+                otherKey: notchRightContentKey
+            )
+        }
+    }
+
+    static var notchRightContent: NotchSlotContent {
+        get { NotchSlotContent(rawValue: UserDefaults.standard.string(forKey: notchRightContentKey) ?? "") ?? .latest }
+        set {
+            writeNotchSlot(
+                newValue,
+                previous: notchRightContent,
+                other: notchLeftContent,
+                key: notchRightContentKey,
+                otherKey: notchLeftContentKey
+            )
+        }
+    }
+
+    private static func writeNotchSlot(
+        _ newValue: NotchSlotContent,
+        previous: NotchSlotContent,
+        other: NotchSlotContent,
+        key: String,
+        otherKey: String
+    ) {
+        UserDefaults.standard.set(newValue.rawValue, forKey: key)
+        if NotchSlotContent.conflict(newValue, other) {
+            let resolved: NotchSlotContent = other == newValue ? previous : .ring
+            UserDefaults.standard.set(resolved.rawValue, forKey: otherKey)
+        }
     }
 
     static var hideSpriteWhenIdle: Bool {

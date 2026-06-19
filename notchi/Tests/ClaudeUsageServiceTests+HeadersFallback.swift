@@ -27,7 +27,7 @@ extension ClaudeUsageServiceTests {
             await service.performFetch(with: "token")
 
             recorder.assertOAuthOnly()
-            XCTAssertEqual(service.error, "Claude authentication needs attention. Tap to reconnect.")
+            XCTAssertEqual(service.error, "Claude authentication needs attention.")
             XCTAssertEqual(service.recoveryAction, .reconnect)
             XCTAssertFalse(service.isConnected)
             XCTAssertTrue(scheduler.intervals.isEmpty)
@@ -214,7 +214,7 @@ extension ClaudeUsageServiceTests {
         XCTAssertEqual(refreshCalls, 1)
         XCTAssertEqual(clearCalls, 1)
         XCTAssertEqual(requestURLs, ["/api/oauth/usage", "/v1/messages"])
-        XCTAssertEqual(service.error, "Claude authentication needs attention. Tap to reconnect.")
+        XCTAssertEqual(service.error, "Claude authentication needs attention.")
         XCTAssertEqual(service.recoveryAction, .reconnect)
         XCTAssertTrue(scheduler.intervals.isEmpty)
     }
@@ -237,7 +237,7 @@ extension ClaudeUsageServiceTests {
         await service.performFetch(with: "token")
 
         XCTAssertNil(service.currentUsage)
-        XCTAssertEqual(service.error, "Claude authentication needs attention. Tap to reconnect.")
+        XCTAssertEqual(service.error, "Claude authentication needs attention.")
         XCTAssertEqual(service.recoveryAction, .reconnect)
         XCTAssertTrue(scheduler.intervals.isEmpty)
     }
@@ -262,7 +262,7 @@ extension ClaudeUsageServiceTests {
         await service.performFetch(with: "token")
 
         XCTAssertEqual(clearCalls, 1)
-        XCTAssertEqual(service.error, "Token expired. Tap to reconnect.")
+        XCTAssertEqual(service.error, "Token expired.")
         XCTAssertEqual(service.recoveryAction, .reconnect)
         XCTAssertFalse(service.isConnected)
     }
@@ -726,7 +726,7 @@ extension ClaudeUsageServiceTests {
         await service.performFetch(with: "token")
 
         XCTAssertNil(service.currentUsage)
-        XCTAssertEqual(service.error, "Claude authentication needs attention. Tap to reconnect.")
+        XCTAssertEqual(service.error, "Claude authentication needs attention.")
         XCTAssertEqual(service.recoveryAction, .reconnect)
         XCTAssertTrue(scheduler.intervals.isEmpty)
     }
@@ -749,7 +749,7 @@ extension ClaudeUsageServiceTests {
         await service.performFetch(with: "token")
 
         XCTAssertNil(service.currentUsage)
-        XCTAssertEqual(service.error, "Claude authentication needs attention. Tap to reconnect.")
+        XCTAssertEqual(service.error, "Claude authentication needs attention.")
         XCTAssertEqual(service.recoveryAction, .reconnect)
         XCTAssertTrue(scheduler.intervals.isEmpty)
     }

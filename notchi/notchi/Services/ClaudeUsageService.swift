@@ -20,6 +20,8 @@ struct ClaudeUsageRecoverySnapshot: Codable, Equatable {
     let oauthHeadersFallbackProbeUntil: Date?
     let isHeadersFallbackActive: Bool
     let lastGoodUsage: QuotaPeriod?
+    let lastGoodWeeklyUsage: QuotaPeriod?
+    let lastGoodSonnetUsage: QuotaPeriod?
     let lastGoodExtraUsage: ExtraUsage?
     let lastObservedExtraUsageCredits: Double?
     let extraUsageResetMarker: String?
@@ -681,6 +683,8 @@ final class ClaudeUsageService {
     static let shared = ClaudeUsageService()
 
     var currentUsage: QuotaPeriod?
+    var currentWeeklyUsage: QuotaPeriod?
+    var currentSonnetUsage: QuotaPeriod?
     var currentExtraUsage: ExtraUsage?
     var isUsingExtraUsage = false
     var isLoading = false
@@ -738,7 +742,7 @@ final class ClaudeUsageService {
                 allowsCredentialRecovery: true,
                 prefersRecoveredCredentials: true
             ) else {
-                presentReconnectRequired(message: "Claude authentication needs attention. Tap to reconnect.")
+                presentReconnectRequired(message: "Claude authentication needs attention.")
                 AppSettings.isUsageEnabled = false
                 return
             }
@@ -793,7 +797,7 @@ final class ClaudeUsageService {
                 AppSettings.isUsageEnabled = false
                 clearOAuthBackoffState()
                 if currentUsage != nil {
-                    presentReconnectRequired(message: "Claude authentication needs attention. Tap to reconnect.")
+                    presentReconnectRequired(message: "Claude authentication needs attention.")
                 } else {
                     clearTransientState()
                 }
@@ -1110,7 +1114,7 @@ final class ClaudeUsageService {
             if allow403EmptyHeadersRecovery {
                 await recoverFromEmptyHeadersFallback(afterOAuth403With: accessToken, userInitiated: userInitiated)
             } else {
-                presentReconnectRequired(message: "Claude authentication needs attention. Tap to reconnect.")
+                presentReconnectRequired(message: "Claude authentication needs attention.")
                 stopPolling()
             }
         }
@@ -1231,6 +1235,8 @@ final class ClaudeUsageService {
             preferHeadersFallback = false
             clearTransientState()
             currentUsage = usageResponse.fiveHour
+            currentWeeklyUsage = usageResponse.sevenDay
+            currentSonnetUsage = usageResponse.sevenDaySonnet
             lastObservedAt = usageResponse.fiveHour == nil ? nil : dependencies.now()
             reconcileExtraUsageState(
                 with: usageResponse.extraUsage,
@@ -1322,6 +1328,8 @@ final class ClaudeUsageService {
             let usage = QuotaPeriod(utilization: (utilization * 100).rounded(), resetDate: resetDate)
             isConnected = true
             currentUsage = usage
+            currentWeeklyUsage = nil
+            currentSonnetUsage = nil
             lastObservedAt = dependencies.now()
             reconcileExtraUsageStateForHeaders(using: usage)
 
@@ -1439,7 +1447,7 @@ final class ClaudeUsageService {
         if usesCredentialMetadata,
            !credentials.scopes.isEmpty,
            !credentials.scopes.contains("user:profile") {
-            presentReconnectRequired(message: "Claude authentication needs attention. Tap to reconnect.")
+            presentReconnectRequired(message: "Claude authentication needs attention.")
             stopPolling()
             return .handled
         }
@@ -1476,11 +1484,11 @@ final class ClaudeUsageService {
 
     private func resolveAuthFailureResolution(after401With currentToken: String) -> ClaudeUsageAuthFailureResolution {
         guard let credentials = dependencies.getOAuthCredentials(false) else {
-            return .reconnect("Token expired. Tap to reconnect.")
+            return .reconnect("Token expired.")
         }
 
         if credentialsRequireReconnect(credentials) {
-            return .reconnect("Claude authentication needs attention. Tap to reconnect.")
+            return .reconnect("Claude authentication needs attention.")
         }
 
         let credentialToken = credentials.accessToken.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1512,7 +1520,7 @@ final class ClaudeUsageService {
             return
         }
 
-        presentReconnectRequired(message: "Claude authentication needs attention. Tap to reconnect.")
+        presentReconnectRequired(message: "Claude authentication needs attention.")
         stopPolling()
     }
 
@@ -1526,7 +1534,7 @@ final class ClaudeUsageService {
             logger.warning(
                 "OAuth 403 requires reconnect - errorType: \(errorTypeLog, privacy: .public), requestID: \(requestIDLog, privacy: .public), message: \(rawMessage, privacy: .public)"
             )
-            presentReconnectRequired(message: "Claude authentication needs attention. Tap to reconnect.")
+            presentReconnectRequired(message: "Claude authentication needs attention.")
             stopPolling()
             return .handled
 
@@ -1836,6 +1844,8 @@ final class ClaudeUsageService {
         let now = dependencies.now()
         guard isUsageStillValid(currentUsage, now: now) else {
             currentUsage = nil
+            currentWeeklyUsage = nil
+            currentSonnetUsage = nil
             clearOAuthBackoffState()
             presentRetryableIssue(
                 noUsageMessage: "No rate limit headers, retrying in \(Int(pollInterval))s",
@@ -1867,6 +1877,8 @@ final class ClaudeUsageService {
         }
 
         currentUsage = isUsageStillValid(snapshot.lastGoodUsage, now: now) ? snapshot.lastGoodUsage : nil
+        currentWeeklyUsage = isUsageStillValid(snapshot.lastGoodWeeklyUsage, now: now) ? snapshot.lastGoodWeeklyUsage : nil
+        currentSonnetUsage = isUsageStillValid(snapshot.lastGoodSonnetUsage, now: now) ? snapshot.lastGoodSonnetUsage : nil
         lastObservedAt = currentUsage == nil ? nil : now
         currentExtraUsage = snapshot.lastGoodExtraUsage
         lastObservedExtraUsageCredits = snapshot.lastObservedExtraUsageCredits
@@ -1913,12 +1925,17 @@ final class ClaudeUsageService {
             return nil
         }
 
-        let usageToPersist = isUsageStillValid(currentUsage, now: dependencies.now()) ? currentUsage : nil
+        let now = dependencies.now()
+        let usageToPersist = isUsageStillValid(currentUsage, now: now) ? currentUsage : nil
+        let weeklyToPersist = isUsageStillValid(currentWeeklyUsage, now: now) ? currentWeeklyUsage : nil
+        let sonnetToPersist = isUsageStillValid(currentSonnetUsage, now: now) ? currentSonnetUsage : nil
         return ClaudeUsageRecoverySnapshot(
             oauthBackoffUntil: oauthBackoffUntil,
             oauthHeadersFallbackProbeUntil: oauthHeadersFallbackProbeUntil,
             isHeadersFallbackActive: isHeadersFallbackActive,
             lastGoodUsage: usageToPersist,
+            lastGoodWeeklyUsage: weeklyToPersist,
+            lastGoodSonnetUsage: sonnetToPersist,
             lastGoodExtraUsage: currentExtraUsage,
             lastObservedExtraUsageCredits: lastObservedExtraUsageCredits,
             extraUsageResetMarker: extraUsageResetMarker,
