@@ -57,8 +57,13 @@ struct UsageDetailView: View {
             return [
                 UsageMetrics.periodDisplay(title: "Session", usage: codexUsage.currentUsage),
                 UsageMetrics.periodDisplay(title: "Weekly", usage: codexUsage.currentWeeklyUsage),
+                UsageMetrics.periodDisplay(title: "Reviews", usage: codexUsage.currentReviewsUsage),
             ].compactMap { $0 }
         }
+    }
+
+    private var codexCreditsUSD: Double? {
+        resolvedProvider == .codex ? codexUsage.currentExtraCreditsUSD : nil
     }
 
     private var extraUsage: ExtraUsageDisplay? {
@@ -77,6 +82,10 @@ struct UsageDetailView: View {
 
             if let extraUsage {
                 ExtraUsageRowView(display: extraUsage)
+            }
+
+            if let codexCreditsUSD {
+                CodexCreditsRowView(remainingUSD: codexCreditsUSD)
             }
         }
         .padding(.top, 8)
@@ -189,5 +198,23 @@ struct ExtraUsageRowView: View {
             return "$\(Int(value))"
         }
         return String(format: "$%.2f", value)
+    }
+}
+
+struct CodexCreditsRowView: View {
+    let remainingUSD: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 7) {
+            Text("Extra usage")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(TerminalColors.primaryText)
+            HStack {
+                Text(String(format: "$%.2f remaining", remainingUSD))
+                    .foregroundColor(TerminalColors.secondaryText)
+                Spacer()
+            }
+            .font(.system(size: 11))
+        }
     }
 }
