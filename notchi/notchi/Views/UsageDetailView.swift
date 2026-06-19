@@ -51,6 +51,7 @@ struct UsageDetailView: View {
             return [
                 UsageMetrics.periodDisplay(title: "Session", usage: claudeUsage.currentUsage),
                 UsageMetrics.periodDisplay(title: "Weekly", usage: claudeUsage.currentWeeklyUsage),
+                UsageMetrics.periodDisplay(title: "Sonnet", usage: claudeUsage.currentSonnetUsage),
             ].compactMap { $0 }
         case .codex:
             return [

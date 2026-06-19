@@ -20,6 +20,38 @@ extension ClaudeUsageServiceTests {
         XCTAssertEqual(service.currentWeeklyUsage?.usagePercentage, 58)
     }
 
+    func testSuccessfulFetchPublishesSonnetUsageFromSevenDaySonnet() async throws {
+        let dependencies = makeDependencies(
+            scheduler: PollSchedulerSpy(),
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { _ in
+                (self.makeSuccessPayload(utilization: 42, weeklyUtilization: 58, sonnetUtilization: 22), self.makeResponse(statusCode: 200))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(service.currentSonnetUsage?.usagePercentage, 22)
+    }
+
+    func testSuccessfulFetchWithoutSevenDaySonnetLeavesSonnetUsageNil() async throws {
+        let dependencies = makeDependencies(
+            scheduler: PollSchedulerSpy(),
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { _ in
+                (self.makeSuccessPayload(utilization: 42, weeklyUtilization: 58), self.makeResponse(statusCode: 200))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+
+        await service.performFetch(with: "token")
+
+        XCTAssertNil(service.currentSonnetUsage)
+    }
+
     func testSuccessfulFetchWithoutSevenDayLeavesWeeklyUsageNil() async throws {
         let dependencies = makeDependencies(
             scheduler: PollSchedulerSpy(),
