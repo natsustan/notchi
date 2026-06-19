@@ -197,6 +197,8 @@ final class ClaudeUsageServiceTests: XCTestCase {
     func makeSuccessPayload(
         utilization: Double,
         resetAt: String = "2099-01-01T01:00:00Z",
+        weeklyUtilization: Double? = nil,
+        weeklyResetAt: String = "2099-01-08T01:00:00Z",
         extraUsage: ExtraUsage? = nil
     ) -> Data {
         var payload: [String: Any] = [
@@ -204,7 +206,9 @@ final class ClaudeUsageServiceTests: XCTestCase {
                 "utilization": utilization,
                 "resets_at": resetAt,
             ],
-            "seven_day": NSNull(),
+            "seven_day": weeklyUtilization.map { weekly in
+                ["utilization": weekly, "resets_at": weeklyResetAt] as [String: Any]
+            } ?? NSNull(),
         ]
 
         if let extraUsage {
@@ -230,6 +234,7 @@ final class ClaudeUsageServiceTests: XCTestCase {
         oauthHeadersFallbackProbeUntil: Date? = nil,
         isHeadersFallbackActive: Bool = false,
         lastGoodUsage: QuotaPeriod? = nil,
+        lastGoodWeeklyUsage: QuotaPeriod? = nil,
         lastGoodExtraUsage: ExtraUsage? = nil,
         lastObservedExtraUsageCredits: Double? = nil,
         extraUsageResetMarker: String? = nil,
@@ -240,6 +245,7 @@ final class ClaudeUsageServiceTests: XCTestCase {
             oauthHeadersFallbackProbeUntil: oauthHeadersFallbackProbeUntil,
             isHeadersFallbackActive: isHeadersFallbackActive,
             lastGoodUsage: lastGoodUsage,
+            lastGoodWeeklyUsage: lastGoodWeeklyUsage,
             lastGoodExtraUsage: lastGoodExtraUsage,
             lastObservedExtraUsageCredits: lastObservedExtraUsageCredits,
             extraUsageResetMarker: extraUsageResetMarker,

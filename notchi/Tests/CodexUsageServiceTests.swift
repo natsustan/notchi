@@ -3,6 +3,39 @@ import XCTest
 
 @MainActor
 final class CodexUsageServiceTests: XCTestCase {
+    func testResolverDecodesSecondaryRateLimitAsWeeklyUsage() throws {
+        let rolloutURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-usage-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: rolloutURL) }
+
+        let contents = """
+        {"timestamp":"2026-04-25T07:03:14.886Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":11.0,"window_minutes":300,"resets_at":1777103326},"secondary":{"used_percent":27.0,"window_minutes":10080,"resets_at":1777621726}}}}
+        """
+        try contents.write(to: rolloutURL, atomically: true, encoding: .utf8)
+
+        let snapshot = try XCTUnwrap(CodexUsageSnapshotResolver.latestSnapshot(transcriptPath: rolloutURL.path))
+
+        XCTAssertEqual(snapshot.usage.usagePercentage, 11)
+        XCTAssertEqual(snapshot.weeklyUsage?.usagePercentage, 27)
+        let weeklyReset = try XCTUnwrap(snapshot.weeklyUsage?.resetDate)
+        XCTAssertEqual(weeklyReset.timeIntervalSince1970, 1_777_621_726, accuracy: 0.001)
+    }
+
+    func testResolverLeavesWeeklyUsageNilWhenSecondaryMissing() throws {
+        let rolloutURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-usage-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: rolloutURL) }
+
+        let contents = """
+        {"timestamp":"2026-04-25T07:03:14.886Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":11.0,"window_minutes":300,"resets_at":1777103326}}}}
+        """
+        try contents.write(to: rolloutURL, atomically: true, encoding: .utf8)
+
+        let snapshot = try XCTUnwrap(CodexUsageSnapshotResolver.latestSnapshot(transcriptPath: rolloutURL.path))
+
+        XCTAssertNil(snapshot.weeklyUsage)
+    }
+
     func testResolverReadsLatestTokenCountFromRollout() throws {
         let rolloutURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("codex-usage-\(UUID().uuidString).jsonl")
@@ -104,6 +137,7 @@ final class CodexUsageServiceTests: XCTestCase {
             resolveUsage: { _ in
                 CodexUsageSnapshot(
                     usage: QuotaPeriod(utilization: 11, resetDate: Date(timeIntervalSince1970: 2_000)),
+                    weeklyUsage: nil,
                     observedAt: observedAt
                 )
             },
@@ -123,6 +157,7 @@ final class CodexUsageServiceTests: XCTestCase {
             resolveUsage: { _ in
                 CodexUsageSnapshot(
                     usage: QuotaPeriod(utilization: 11, resetDate: Date(timeIntervalSince1970: 900)),
+                    weeklyUsage: nil,
                     observedAt: Date(timeIntervalSince1970: 800)
                 )
             },

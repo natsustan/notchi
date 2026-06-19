@@ -165,6 +165,7 @@ struct ExpandedPanelView: View {
     @Binding var showingSettings: Bool
     @Binding var showingSettingsDetail: Bool
     @Binding var showingSessionActivity: Bool
+    @Binding var showingUsageDetail: Bool
     @Binding var isActivityCollapsed: Bool
     @Binding var hoveredSessionId: String?
 
@@ -175,6 +176,7 @@ struct ExpandedPanelView: View {
         showingSettings: Binding<Bool>,
         showingSettingsDetail: Binding<Bool>,
         showingSessionActivity: Binding<Bool>,
+        showingUsageDetail: Binding<Bool>,
         isActivityCollapsed: Binding<Bool>,
         hoveredSessionId: Binding<String?>
     ) {
@@ -184,6 +186,7 @@ struct ExpandedPanelView: View {
         _showingSettings = showingSettings
         _showingSettingsDetail = showingSettingsDetail
         _showingSessionActivity = showingSessionActivity
+        _showingUsageDetail = showingUsageDetail
         _isActivityCollapsed = isActivityCollapsed
         _hoveredSessionId = hoveredSessionId
     }
@@ -199,6 +202,22 @@ struct ExpandedPanelView: View {
 
     private var usageContextSession: SessionData? {
         hoveredSession ?? effectiveSession
+    }
+
+    private var usageDetailDefaultProvider: AgentProvider {
+        usageContextSession?.provider ?? sharedUsageBarState?.provider ?? .claude
+    }
+
+    private var hasUsageDetailData: Bool {
+        UsageMetrics.claudeHasData(
+            usage: usageService.currentUsage,
+            weeklyUsage: usageService.currentWeeklyUsage,
+            extraUsage: usageService.currentExtraUsage
+        )
+            || UsageMetrics.codexHasData(
+                usage: codexUsageService.currentUsage,
+                weeklyUsage: codexUsageService.currentWeeklyUsage
+            )
     }
 
     private var state: NotchiState {
@@ -323,7 +342,10 @@ struct ExpandedPanelView: View {
                 if !showingSettings {
                     VStack(alignment: .leading, spacing: 0) {
                         ZStack {
-                            if shouldShowSessionPicker {
+                            if showingUsageDetail {
+                                usageDetailContent(geometry: geometry)
+                                    .transition(primaryContentTransition)
+                            } else if shouldShowSessionPicker {
                                 sessionPickerContent(geometry: geometry)
                                     .transition(primaryContentTransition)
                             } else {
@@ -333,9 +355,11 @@ struct ExpandedPanelView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
 
-                        sharedUsageBar
-                            .padding(.horizontal, 12)
-                            .padding(.bottom, 5)
+                        if !showingUsageDetail {
+                            sharedUsageBar
+                                .padding(.horizontal, 12)
+                                .padding(.bottom, 5)
+                        }
                     }
                 }
 
@@ -347,11 +371,15 @@ struct ExpandedPanelView: View {
             }
         }
         .animation(.easeInOut(duration: 0.25), value: showingSettings)
+        .animation(.easeInOut(duration: 0.25), value: showingUsageDetail)
         .animation(.easeInOut(duration: 0.25), value: shouldShowSessionPicker)
         .onChange(of: showingSettings) { _, isShowing in
             if !isShowing {
                 showingSettingsDetail = false
                 UpdateManager.shared.clearTransientStatus()
+            }
+            if isShowing {
+                showingUsageDetail = false
             }
         }
     }
@@ -394,6 +422,30 @@ struct ExpandedPanelView: View {
                 Spacer()
             }
             .padding(.horizontal, 12)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private func usageDetailContent(geometry: GeometryProxy) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if isActivityCollapsed {
+                Spacer()
+                    .allowsHitTesting(false)
+            } else {
+                Spacer()
+                    .frame(height: geometry.size.height * 0.3)
+                    .allowsHitTesting(false)
+            }
+
+            UsageDetailView(
+                claudeUsage: usageService,
+                codexUsage: codexUsageService,
+                defaultProvider: usageDetailDefaultProvider
+            )
+            .padding(.horizontal, 12)
+
+            Spacer(minLength: 0)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
@@ -452,7 +504,8 @@ struct ExpandedPanelView: View {
                 compact: !shouldShowSessionPicker && isActivityCollapsed,
                 isEnabled: state.isProviderSpecific ? Self.sharedUsageBarIsEnabled(provider: state.provider) : true,
                 onConnect: state.provider == .claude && state.isProviderSpecific ? { usageService.connectAndStartPolling() } : nil,
-                onRetry: state.provider == .claude && state.isProviderSpecific ? { usageService.retryNow() } : nil
+                onRetry: state.provider == .claude && state.isProviderSpecific ? { usageService.retryNow() } : nil,
+                onOpenDetail: hasUsageDetailData ? { showingUsageDetail = true } : nil
             )
         }
     }

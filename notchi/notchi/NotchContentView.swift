@@ -93,6 +93,7 @@ struct NotchContentView: View {
     @AppStorage(AppSettings.notchRightContentKey) private var rightContentRaw = NotchSlotContent.latest.rawValue
     @State private var showingPanelSettings = false
     @State private var showingPanelSettingsDetail = false
+    @State private var showingUsageDetail = false
     @State private var showingSessionActivity = false
     @State private var isMuted = AppSettings.isMuted
     @State private var isActivityCollapsed = false
@@ -336,6 +337,7 @@ struct NotchContentView: View {
 
     private var shouldShowBackButton: Bool {
         showingPanelSettings ||
+        showingUsageDetail ||
         (sessionStore.activeSessionCount >= 2 && showingSessionActivity)
     }
 
@@ -460,6 +462,7 @@ struct NotchContentView: View {
                 showingPanelSettings = false
                 showingPanelSettingsDetail = false
                 showingSessionActivity = false
+                showingUsageDetail = false
                 hoveredSessionId = nil
             }
         }
@@ -485,6 +488,7 @@ struct NotchContentView: View {
                         showingSettings: $showingPanelSettings,
                         showingSettingsDetail: $showingPanelSettingsDetail,
                         showingSessionActivity: $showingSessionActivity,
+                        showingUsageDetail: $showingUsageDetail,
                         isActivityCollapsed: $isActivityCollapsed,
                         hoveredSessionId: $hoveredSessionId
                     )
@@ -568,6 +572,8 @@ struct NotchContentView: View {
             } else {
                 showingPanelSettings = false
             }
+        } else if showingUsageDetail {
+            showingUsageDetail = false
         } else if showingSessionActivity {
             showingSessionActivity = false
             sessionStore.clearSelectedSession()

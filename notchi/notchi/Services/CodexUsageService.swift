@@ -2,6 +2,7 @@ import Foundation
 
 nonisolated struct CodexUsageSnapshot: Sendable, Equatable {
     let usage: QuotaPeriod
+    let weeklyUsage: QuotaPeriod?
     let observedAt: Date
 }
 
@@ -23,6 +24,7 @@ final class CodexUsageService {
     static let shared = CodexUsageService()
 
     var currentUsage: QuotaPeriod?
+    var currentWeeklyUsage: QuotaPeriod?
     var isUsageStale = false
     var statusMessage: String?
     var lastObservedAt: Date?
@@ -52,6 +54,7 @@ final class CodexUsageService {
 
     func clear() {
         currentUsage = nil
+        currentWeeklyUsage = nil
         isUsageStale = false
         statusMessage = nil
         lastObservedAt = nil
@@ -62,6 +65,7 @@ final class CodexUsageService {
 
         if let snapshot, isUsageStillValid(snapshot.usage, now: now) {
             currentUsage = snapshot.usage
+            currentWeeklyUsage = snapshot.weeklyUsage
             lastObservedAt = snapshot.observedAt
             isUsageStale = now.timeIntervalSince(snapshot.observedAt) > Self.staleObservationInterval
             statusMessage = nil
@@ -126,11 +130,19 @@ nonisolated enum CodexUsageSnapshotResolver {
                 continue
             }
 
+            let weeklyUsage = event.payload?.rateLimits?.secondary.map { secondary in
+                QuotaPeriod(
+                    utilization: secondary.usedPercent.rounded(),
+                    resetDate: Date(timeIntervalSince1970: secondary.resetsAt)
+                )
+            }
+
             let snapshot = CodexUsageSnapshot(
                 usage: QuotaPeriod(
                     utilization: primary.usedPercent.rounded(),
                     resetDate: Date(timeIntervalSince1970: primary.resetsAt)
                 ),
+                weeklyUsage: weeklyUsage,
                 observedAt: observedAt
             )
             if latestSnapshot.map({ observedAt > $0.observedAt }) ?? true {
@@ -194,6 +206,7 @@ private nonisolated struct CodexTokenCountEvent: Decodable {
 
     struct RateLimits: Decodable {
         let primary: Limit?
+        let secondary: Limit?
     }
 
     struct Limit: Decodable {

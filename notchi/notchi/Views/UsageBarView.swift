@@ -14,6 +14,7 @@ struct UsageBarView: View {
     var isEnabled: Bool = AppSettings.isUsageEnabled
     var onConnect: (() -> Void)?
     var onRetry: (() -> Void)?
+    var onOpenDetail: (() -> Void)?
 
     @State private var isPulsing = false
 
@@ -30,7 +31,8 @@ struct UsageBarView: View {
         compact: Bool = false,
         isEnabled: Bool = AppSettings.isUsageEnabled,
         onConnect: (() -> Void)? = nil,
-        onRetry: (() -> Void)? = nil
+        onRetry: (() -> Void)? = nil,
+        onOpenDetail: (() -> Void)? = nil
     ) {
         self.usage = usage
         self.isUsingExtraUsage = isUsingExtraUsage
@@ -45,6 +47,7 @@ struct UsageBarView: View {
         self.isEnabled = isEnabled
         self.onConnect = onConnect
         self.onRetry = onRetry
+        self.onOpenDetail = onOpenDetail
     }
 
     var shouldShowRecoveryButton: Bool {
@@ -194,6 +197,8 @@ struct UsageBarView: View {
             progressBar
         }
         .padding(.top, compact ? 0 : 5)
+        .contentShape(Rectangle())
+        .onTapGesture { onOpenDetail?() }
     }
 
     private var recoveryButton: some View {

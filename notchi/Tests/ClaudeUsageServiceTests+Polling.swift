@@ -3,6 +3,40 @@ import XCTest
 @testable import notchi
 
 extension ClaudeUsageServiceTests {
+    func testSuccessfulFetchPublishesWeeklyUsageFromSevenDay() async throws {
+        let dependencies = makeDependencies(
+            scheduler: PollSchedulerSpy(),
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { _ in
+                (self.makeSuccessPayload(utilization: 42, weeklyUtilization: 58), self.makeResponse(statusCode: 200))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 42)
+        XCTAssertEqual(service.currentWeeklyUsage?.usagePercentage, 58)
+    }
+
+    func testSuccessfulFetchWithoutSevenDayLeavesWeeklyUsageNil() async throws {
+        let dependencies = makeDependencies(
+            scheduler: PollSchedulerSpy(),
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { _ in
+                (self.makeSuccessPayload(utilization: 42), self.makeResponse(statusCode: 200))
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(service.currentUsage?.usagePercentage, 42)
+        XCTAssertNil(service.currentWeeklyUsage)
+    }
+
     func testSuccessfulFetchClearsStaleStateAndSchedulesNormalPolling() async throws {
         let scheduler = PollSchedulerSpy()
         let dependencies = makeDependencies(

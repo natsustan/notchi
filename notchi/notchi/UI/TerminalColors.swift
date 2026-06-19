@@ -17,6 +17,14 @@ struct TerminalColors {
     static let dimmedText = Color.white.opacity(0.3)
     static let subtleBackground = Color.white.opacity(0.04)
     static let hoverBackground = Color.white.opacity(0.08)
+
+    static func usageColor(forPercentUsed percentUsed: Int) -> Color {
+        switch percentUsed {
+        case ..<50: return green
+        case ..<80: return amber
+        default: return red
+        }
+    }
 }
 
 extension AgentProvider {

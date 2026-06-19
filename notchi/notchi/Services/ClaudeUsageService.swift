@@ -20,6 +20,7 @@ struct ClaudeUsageRecoverySnapshot: Codable, Equatable {
     let oauthHeadersFallbackProbeUntil: Date?
     let isHeadersFallbackActive: Bool
     let lastGoodUsage: QuotaPeriod?
+    let lastGoodWeeklyUsage: QuotaPeriod?
     let lastGoodExtraUsage: ExtraUsage?
     let lastObservedExtraUsageCredits: Double?
     let extraUsageResetMarker: String?
@@ -681,6 +682,7 @@ final class ClaudeUsageService {
     static let shared = ClaudeUsageService()
 
     var currentUsage: QuotaPeriod?
+    var currentWeeklyUsage: QuotaPeriod?
     var currentExtraUsage: ExtraUsage?
     var isUsingExtraUsage = false
     var isLoading = false
@@ -1231,6 +1233,7 @@ final class ClaudeUsageService {
             preferHeadersFallback = false
             clearTransientState()
             currentUsage = usageResponse.fiveHour
+            currentWeeklyUsage = usageResponse.sevenDay
             lastObservedAt = usageResponse.fiveHour == nil ? nil : dependencies.now()
             reconcileExtraUsageState(
                 with: usageResponse.extraUsage,
@@ -1322,6 +1325,7 @@ final class ClaudeUsageService {
             let usage = QuotaPeriod(utilization: (utilization * 100).rounded(), resetDate: resetDate)
             isConnected = true
             currentUsage = usage
+            currentWeeklyUsage = nil
             lastObservedAt = dependencies.now()
             reconcileExtraUsageStateForHeaders(using: usage)
 
@@ -1836,6 +1840,7 @@ final class ClaudeUsageService {
         let now = dependencies.now()
         guard isUsageStillValid(currentUsage, now: now) else {
             currentUsage = nil
+            currentWeeklyUsage = nil
             clearOAuthBackoffState()
             presentRetryableIssue(
                 noUsageMessage: "No rate limit headers, retrying in \(Int(pollInterval))s",
@@ -1867,6 +1872,7 @@ final class ClaudeUsageService {
         }
 
         currentUsage = isUsageStillValid(snapshot.lastGoodUsage, now: now) ? snapshot.lastGoodUsage : nil
+        currentWeeklyUsage = isUsageStillValid(snapshot.lastGoodWeeklyUsage, now: now) ? snapshot.lastGoodWeeklyUsage : nil
         lastObservedAt = currentUsage == nil ? nil : now
         currentExtraUsage = snapshot.lastGoodExtraUsage
         lastObservedExtraUsageCredits = snapshot.lastObservedExtraUsageCredits
@@ -1913,12 +1919,15 @@ final class ClaudeUsageService {
             return nil
         }
 
-        let usageToPersist = isUsageStillValid(currentUsage, now: dependencies.now()) ? currentUsage : nil
+        let now = dependencies.now()
+        let usageToPersist = isUsageStillValid(currentUsage, now: now) ? currentUsage : nil
+        let weeklyToPersist = isUsageStillValid(currentWeeklyUsage, now: now) ? currentWeeklyUsage : nil
         return ClaudeUsageRecoverySnapshot(
             oauthBackoffUntil: oauthBackoffUntil,
             oauthHeadersFallbackProbeUntil: oauthHeadersFallbackProbeUntil,
             isHeadersFallbackActive: isHeadersFallbackActive,
             lastGoodUsage: usageToPersist,
+            lastGoodWeeklyUsage: weeklyToPersist,
             lastGoodExtraUsage: currentExtraUsage,
             lastObservedExtraUsageCredits: lastObservedExtraUsageCredits,
             extraUsageResetMarker: extraUsageResetMarker,
