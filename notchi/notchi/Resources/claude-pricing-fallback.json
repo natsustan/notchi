@@ -1,23 +1,6 @@
 {
   "version": 1,
   "models": {
-    "claude-sonnet-4": {
-      "inputPerToken": 0.000003,
-      "outputPerToken": 0.000015,
-      "cacheCreationPerToken": 0.00000375,
-      "cacheReadPerToken": 0.0000003,
-      "thresholdTokens": 200000,
-      "inputPerTokenAboveThreshold": 0.000006,
-      "outputPerTokenAboveThreshold": 0.0000225,
-      "cacheCreationPerTokenAboveThreshold": 0.0000075,
-      "cacheReadPerTokenAboveThreshold": 0.0000006
-    },
-    "claude-sonnet-4-5": {
-      "inputPerToken": 0.000003,
-      "outputPerToken": 0.000015,
-      "cacheCreationPerToken": 0.00000375,
-      "cacheReadPerToken": 0.0000003
-    },
     "claude-sonnet-4-6": {
       "inputPerToken": 0.000003,
       "outputPerToken": 0.000015,
@@ -28,24 +11,6 @@
       "outputPerTokenAboveThreshold": 0.0000225,
       "cacheCreationPerTokenAboveThreshold": 0.0000075,
       "cacheReadPerTokenAboveThreshold": 0.0000006
-    },
-    "claude-3-7-sonnet": {
-      "inputPerToken": 0.000003,
-      "outputPerToken": 0.000015,
-      "cacheCreationPerToken": 0.00000375,
-      "cacheReadPerToken": 0.0000003
-    },
-    "claude-opus-4": {
-      "inputPerToken": 0.000015,
-      "outputPerToken": 0.000075,
-      "cacheCreationPerToken": 0.00001875,
-      "cacheReadPerToken": 0.0000015
-    },
-    "claude-opus-4-1": {
-      "inputPerToken": 0.000015,
-      "outputPerToken": 0.000075,
-      "cacheCreationPerToken": 0.00001875,
-      "cacheReadPerToken": 0.0000015
     },
     "claude-opus-4-5": {
       "inputPerToken": 0.000005,

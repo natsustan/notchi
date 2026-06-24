@@ -1,7 +1,7 @@
 import Foundation
 
-struct CostUsageCache: Codable, Equatable {
-    struct FileState: Codable, Equatable {
+nonisolated struct CostUsageCache: Codable, Equatable {
+    nonisolated struct FileState: Codable, Equatable {
         var size: Int64
         var mtime: Double
         var offset: Int64
@@ -9,16 +9,23 @@ struct CostUsageCache: Codable, Equatable {
 
     static let currentVersion = 1
     var version: Int
-    var files: [String: FileState]   // [filePath: state]
+    var files: [String: FileState]
     var buckets: DayModelBuckets
+    var pricingSignature: String? = nil
+
+    func reconciled(withPricingSignature signature: String) -> CostUsageCache {
+        pricingSignature == signature
+            ? self
+            : CostUsageCache(version: Self.currentVersion, files: [:], buckets: [:], pricingSignature: signature)
+    }
 }
 
-enum CostUsageCacheStore {
+nonisolated enum CostUsageCacheStore {
     static func load(url: URL) -> CostUsageCache {
         guard let data = try? Data(contentsOf: url),
               let decoded = try? JSONDecoder().decode(CostUsageCache.self, from: data),
               decoded.version == CostUsageCache.currentVersion
-        else { return CostUsageCache(version: CostUsageCache.currentVersion, files: [:], buckets: [:]) }
+        else { return CostUsageCache(version: CostUsageCache.currentVersion, files: [:], buckets: [:], pricingSignature: nil) }
         return decoded
     }
 

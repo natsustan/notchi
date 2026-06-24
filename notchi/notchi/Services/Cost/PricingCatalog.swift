@@ -1,12 +1,12 @@
 import Foundation
 
-final class PricingCatalog: ClaudePricingProviding, @unchecked Sendable {
-    private struct Snapshot: Decodable {
+nonisolated final class PricingCatalog: ClaudePricingProviding, @unchecked Sendable {
+    private struct Snapshot: Codable {
         let version: Int
         let models: [String: ClaudeModelPricingDTO]
     }
 
-    private struct ClaudeModelPricingDTO: Decodable {
+    private struct ClaudeModelPricingDTO: Codable {
         let inputPerToken: Double
         let outputPerToken: Double
         let cacheCreationPerToken: Double
@@ -17,6 +17,19 @@ final class PricingCatalog: ClaudePricingProviding, @unchecked Sendable {
         let outputPerTokenAboveThreshold: Double?
         let cacheCreationPerTokenAboveThreshold: Double?
         let cacheReadPerTokenAboveThreshold: Double?
+
+        init(from pricing: ClaudeModelPricing) {
+            inputPerToken = pricing.inputPerToken
+            outputPerToken = pricing.outputPerToken
+            cacheCreationPerToken = pricing.cacheCreationPerToken
+            cacheReadPerToken = pricing.cacheReadPerToken
+            cacheCreation1hPerToken = pricing.cacheCreation1hPerToken
+            thresholdTokens = pricing.thresholdTokens
+            inputPerTokenAboveThreshold = pricing.inputPerTokenAboveThreshold
+            outputPerTokenAboveThreshold = pricing.outputPerTokenAboveThreshold
+            cacheCreationPerTokenAboveThreshold = pricing.cacheCreationPerTokenAboveThreshold
+            cacheReadPerTokenAboveThreshold = pricing.cacheReadPerTokenAboveThreshold
+        }
 
         func toPricing() -> ClaudeModelPricing {
             ClaudeModelPricing(
@@ -33,7 +46,6 @@ final class PricingCatalog: ClaudePricingProviding, @unchecked Sendable {
         }
     }
 
-    // models.dev /api.json shape — only the fields we need
     private struct ModelsDev: Decodable {
         let anthropic: ModelsDev.Provider?
 
@@ -69,9 +81,19 @@ final class PricingCatalog: ClaudePricingProviding, @unchecked Sendable {
 
     private let lock = NSLock()
     private var table: [String: ClaudeModelPricing]
+    private let snapshotURL: URL?
 
-    init(fallbackBundle: Bundle) {
+    init(fallbackBundle: Bundle, snapshotURL: URL? = nil) {
         table = Self.loadFallback(bundle: fallbackBundle)
+        if let url = snapshotURL, let overlay = Self.loadSnapshot(url: url) {
+            table.merge(overlay) { _, new in new }
+        }
+        self.snapshotURL = snapshotURL
+    }
+
+    init(table: [String: ClaudeModelPricing]) {
+        self.table = table
+        self.snapshotURL = nil
     }
 
     private static func loadFallback(bundle: Bundle) -> [String: ClaudeModelPricing] {
@@ -80,6 +102,18 @@ final class PricingCatalog: ClaudePricingProviding, @unchecked Sendable {
               let snap = try? JSONDecoder().decode(Snapshot.self, from: data)
         else { return [:] }
         return snap.models.mapValues { $0.toPricing() }
+    }
+
+    private static func loadSnapshot(url: URL) -> [String: ClaudeModelPricing]? {
+        guard let data = try? Data(contentsOf: url),
+              let snap = try? JSONDecoder().decode(Snapshot.self, from: data)
+        else { return nil }
+        return snap.models.mapValues { $0.toPricing() }
+    }
+
+    static func defaultSnapshotURL() -> URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("CostUsage/models-dev.json")
     }
 
     func pricing(model: String, on date: Date) -> ClaudeModelPricing? {
@@ -101,7 +135,6 @@ final class PricingCatalog: ClaudePricingProviding, @unchecked Sendable {
             guard let cost = entry.cost else { continue }
             let key = CostPricing.normalizeClaudeModel(rawId)
 
-            // Extract tier pricing when the first tier is a context-size threshold
             let firstTier = cost.tiers?.first(where: { $0.tier?.type == "context" })
             let thresholdTokens = firstTier?.tier?.size
 
@@ -120,6 +153,7 @@ final class PricingCatalog: ClaudePricingProviding, @unchecked Sendable {
 
         guard Self.isPlausibleRefresh(updated) else { return }
         replaceTable(updated)
+        persistSnapshot(updated)
     }
 
     private func replaceTable(_ updated: [String: ClaudeModelPricing]) {
@@ -127,8 +161,37 @@ final class PricingCatalog: ClaudePricingProviding, @unchecked Sendable {
         table = updated
     }
 
-    // Symmetric prefix checks: models.dev may key Sonnet/Opus with version suffixes
-    // (e.g. claude-sonnet-4-5), so an exact-key match would silently reject every refresh.
+    private func persistSnapshot(_ updated: [String: ClaudeModelPricing]) {
+        guard let url = snapshotURL else { return }
+        let dtos = updated.mapValues { ClaudeModelPricingDTO(from: $0) }
+        let snap = Snapshot(version: 1, models: dtos)
+        guard let data = try? JSONEncoder().encode(snap) else { return }
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let tmp = url.deletingLastPathComponent().appendingPathComponent(".tmp-\(UUID().uuidString)")
+        guard (try? data.write(to: tmp, options: .atomic)) != nil else { return }
+        _ = try? FileManager.default.replaceItemAt(url, withItemAt: tmp)
+    }
+
+    func signature() -> String {
+        lock.lock()
+        let sorted = table.sorted(by: { $0.key < $1.key })
+        lock.unlock()
+
+        var buffer = ""
+        for (key, p) in sorted {
+            buffer += "\(key):\(p.inputPerToken):\(p.outputPerToken):\(p.cacheCreationPerToken):\(p.cacheReadPerToken):\(p.thresholdTokens ?? -1):\(p.inputPerTokenAboveThreshold ?? -1):\(p.outputPerTokenAboveThreshold ?? -1):\(p.cacheCreationPerTokenAboveThreshold ?? -1):\(p.cacheReadPerTokenAboveThreshold ?? -1)"
+        }
+        let fnvOffsetBasis: UInt64 = 0xcbf2_9ce4_8422_2325
+        let fnvPrime: UInt64 = 0x0000_0100_0000_01b3
+        var hash = fnvOffsetBasis
+        for byte in buffer.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* fnvPrime
+        }
+        return String(hash, radix: 16)
+    }
+
     static func isPlausibleRefresh(_ candidate: [String: ClaudeModelPricing]) -> Bool {
         let hasSonnet4Family = candidate.keys.contains(where: { $0.hasPrefix("claude-sonnet-4") })
         let hasOpus4Family = candidate.keys.contains(where: { $0.hasPrefix("claude-opus-4") })

@@ -3,7 +3,7 @@ import XCTest
 
 final class ClaudeCostScannerTests: XCTestCase {
     private struct FlatPrice: ClaudePricingProviding {
-        func pricing(model: String, on date: Date) -> ClaudeModelPricing? {
+        nonisolated func pricing(model: String, on date: Date) -> ClaudeModelPricing? {
             ClaudeModelPricing(inputPerToken: 1e-6, outputPerToken: 1e-6,
                 cacheCreationPerToken: 0, cacheReadPerToken: 0, cacheCreation1hPerToken: nil,
                 thresholdTokens: nil, inputPerTokenAboveThreshold: nil,
@@ -40,12 +40,12 @@ final class ClaudeCostScannerTests: XCTestCase {
     func testDuplicateMessageRequestPairCountedOnce() throws {
         let url = try writeFile([
             line(msgId: "m1", reqId: "r1", input: 100, output: 0),
-            line(msgId: "m1", reqId: "r1", input: 100, output: 0),  // exact dup
+            line(msgId: "m1", reqId: "r1", input: 100, output: 0),
         ])
         let s = scanner(root: url.deletingLastPathComponent().deletingLastPathComponent())
         let out = s.scan(cache: CostUsageCache(version: CostUsageCache.currentVersion, files: [:], buckets: [:]),
                          now: ISO8601DateFormatter().date(from: "2026-06-24T12:00:00Z")!)
-        XCTAssertEqual(out.buckets["2026-06-24"]?["claude-opus-4"]?.input, 100)  // not 200
+        XCTAssertEqual(out.buckets["2026-06-24"]?["claude-opus-4"]?.input, 100)
         XCTAssertEqual(out.buckets["2026-06-24"]?["claude-opus-4"]?.requestCount, 1)
     }
 
@@ -57,12 +57,11 @@ final class ClaudeCostScannerTests: XCTestCase {
         let first = s.scan(cache: CostUsageCache(version: CostUsageCache.currentVersion, files: [:], buckets: [:]), now: now)
         XCTAssertEqual(first.buckets["2026-06-24"]?["claude-opus-4"]?.input, 100)
 
-        // append a new line, rescan with the prior cache
         let fh = try FileHandle(forWritingTo: url); fh.seekToEndOfFile()
         fh.write((line(msgId: "m2", reqId: "r2", input: 50, output: 0) + "\n").data(using: .utf8)!)
         try fh.close()
         let second = s.scan(cache: first, now: now)
-        XCTAssertEqual(second.buckets["2026-06-24"]?["claude-opus-4"]?.input, 150)  // 100 + 50, no re-count
+        XCTAssertEqual(second.buckets["2026-06-24"]?["claude-opus-4"]?.input, 150)
         XCTAssertEqual(second.buckets["2026-06-24"]?["claude-opus-4"]?.requestCount, 2)
     }
 }

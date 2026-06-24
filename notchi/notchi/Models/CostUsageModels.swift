@@ -1,17 +1,17 @@
 import Foundation
 
-enum CostProvider: String, Codable, Sendable, CaseIterable {
+nonisolated enum CostProvider: String, Codable, Sendable, CaseIterable {
     case claude
     case codex
 }
 
-struct ModelTokenTotals: Equatable, Sendable, Codable {
+nonisolated struct ModelTokenTotals: Equatable, Sendable, Codable {
     var input: Int = 0
     var cacheRead: Int = 0
     var cacheCreation: Int = 0
     var cacheCreation1h: Int = 0
     var output: Int = 0
-    var costNanos: Int = 0           // USD × 1_000_000_000 (integer to avoid float drift)
+    var costNanos: Int = 0
     var requestCount: Int = 0
     var pricedCount: Int = 0
 
@@ -28,21 +28,21 @@ struct ModelTokenTotals: Equatable, Sendable, Codable {
     }
 }
 
-typealias DayModelBuckets = [String: [String: ModelTokenTotals]]  // [dayKey: [model: totals]]
+typealias DayModelBuckets = [String: [String: ModelTokenTotals]]
 
-struct DailyCostReport: Equatable, Sendable {
-    struct DayEntry: Equatable, Sendable, Identifiable {
-        let day: String          // "yyyy-MM-dd"
+nonisolated struct DailyCostReport: Equatable, Sendable {
+    nonisolated struct DayEntry: Equatable, Sendable, Identifiable {
+        let day: String
         let date: Date
         let costUSD: Double
         let totalTokens: Int
         let requestCount: Int
-        let pricedFraction: Double   // 0...1; 1 = every request priced
+        let pricedFraction: Double
         var id: String { day }
     }
 
     let provider: CostProvider
-    let entries: [DayEntry]      // ascending by date, gap-filled across window
+    let entries: [DayEntry]
     let topModel: String?
 
     var windowCostUSD: Double { entries.reduce(0) { $0 + $1.costUSD } }
@@ -59,7 +59,6 @@ struct DailyCostReport: Equatable, Sendable {
         provider: CostProvider, buckets: DayModelBuckets,
         window: DateInterval, today: Date, calendar: Calendar) -> DailyCostReport
     {
-        // 1) gap-filled ascending day list across [window.start, today]
         var entries: [DayEntry] = []
         var cursor = calendar.startOfDay(for: window.start)
         let last = calendar.startOfDay(for: today)

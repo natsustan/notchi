@@ -23,12 +23,10 @@ final class CostHistoryStore {
         self.pricingCatalog = nil
     }
 
-    /// Production initializer — builds scanProvider from real scanner + cache.
     convenience init(windowDays: Int = 30, calendar: Calendar = .current,
                      pricing: PricingCatalog,
                      projectsRoots: [URL],
                      cacheURL: URL) {
-        // Construct scanner once; closure captures it and calls scan() serially (one at a time via isScanning guard).
         let scanner = ClaudeCostScanner(
             projectsRoots: projectsRoots,
             pricing: pricing,
@@ -37,8 +35,10 @@ final class CostHistoryStore {
 
         self.init(windowDays: windowDays, calendar: calendar, pricingCatalog: pricing) { now in
             await Task.detached(priority: .utility) {
-                let cache = CostUsageCacheStore.load(url: cacheURL)
-                let updated = scanner.scan(cache: cache, now: now)
+                let sig = pricing.signature()
+                let cache = CostUsageCacheStore.load(url: cacheURL).reconciled(withPricingSignature: sig)
+                var updated = scanner.scan(cache: cache, now: now)
+                updated.pricingSignature = sig
                 CostUsageCacheStore.save(updated, to: cacheURL)
                 return updated.buckets
             }.value
@@ -84,7 +84,8 @@ final class CostHistoryStore {
 
 extension CostHistoryStore {
     static let shared: CostHistoryStore = {
-        let pricing = PricingCatalog(fallbackBundle: .main)
+        let pricing = PricingCatalog(fallbackBundle: .main,
+                                     snapshotURL: PricingCatalog.defaultSnapshotURL())
         let projectsRoot = URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent(".claude/projects", isDirectory: true)
         let cacheURL: URL

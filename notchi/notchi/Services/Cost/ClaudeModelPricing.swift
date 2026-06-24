@@ -1,6 +1,6 @@
 import Foundation
 
-struct ClaudeModelPricing: Equatable, Sendable {
+nonisolated struct ClaudeModelPricing: Equatable, Sendable {
     let inputPerToken: Double
     let outputPerToken: Double
     let cacheCreationPerToken: Double
@@ -14,15 +14,13 @@ struct ClaudeModelPricing: Equatable, Sendable {
 }
 
 protocol ClaudePricingProviding: Sendable {
-    func pricing(model: String, on date: Date) -> ClaudeModelPricing?
+    nonisolated func pricing(model: String, on date: Date) -> ClaudeModelPricing?
 }
 
-enum CostPricing {
-    /// Strips date suffix and provider prefix: "anthropic/claude-sonnet-4-20250514" → "claude-sonnet-4".
+nonisolated enum CostPricing {
     static func normalizeClaudeModel(_ raw: String) -> String {
         var s = raw
         if let slash = s.lastIndex(of: "/") { s = String(s[s.index(after: slash)...]) }
-        // drop a trailing -YYYYMMDD date stamp
         if let r = s.range(of: #"-\d{8}$"#, options: .regularExpression) { s.removeSubrange(r) }
         return s
     }
@@ -40,7 +38,6 @@ enum CostPricing {
         let crP = useAbove ? (pricing.cacheCreationPerTokenAboveThreshold ?? pricing.cacheCreationPerToken) : pricing.cacheCreationPerToken
         let rdP = useAbove ? (pricing.cacheReadPerTokenAboveThreshold ?? pricing.cacheReadPerToken) : pricing.cacheReadPerToken
 
-        // cacheCreation1h is a subset of cacheCreation priced at a separate rate when available.
         let standardCreate = max(0, cacheCreation - cacheCreation1h)
         let create1hCost = Double(cacheCreation1h) * (pricing.cacheCreation1hPerToken ?? crP)
 

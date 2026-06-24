@@ -1,13 +1,11 @@
 import Foundation
 
-// nonisolated: scanner runs from detached tasks; must not inherit @MainActor default isolation.
 final class ClaudeCostScanner {
     let projectsRoots: [URL]
     let pricing: any ClaudePricingProviding
     let windowDays: Int
     let calendar: Calendar
 
-    // seen is mutated only within scan(), which callers must invoke serially.
     nonisolated(unsafe) private var seen = Set<String>()
 
     nonisolated init(projectsRoots: [URL], pricing: any ClaudePricingProviding, windowDays: Int, calendar: Calendar) {
@@ -35,8 +33,8 @@ final class ClaudeCostScanner {
                 let size = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
                 let mtime = ((attrs?[.modificationDate] as? Date)?.timeIntervalSince1970) ?? 0
                 var state = cache.files[path] ?? .init(size: 0, mtime: 0, offset: 0)
-                if state.size == size, state.mtime == mtime { continue }  // unchanged → skip
-                let startOffset = (size >= state.size) ? state.offset : 0  // truncated/rotated → full reparse
+                if state.size == size, state.mtime == mtime { continue }
+                let startOffset = (size >= state.size) ? state.offset : 0
 
                 state.offset = parseFile(url: url, startOffset: startOffset, sinceKey: sinceKey, into: &cache.buckets)
                 state.size = size
@@ -48,7 +46,6 @@ final class ClaudeCostScanner {
         return cache
     }
 
-    /// Returns new byte offset (end of fully-consumed lines).
     nonisolated private func parseFile(url: URL, startOffset: Int64, sinceKey: String,
                                        into buckets: inout DayModelBuckets) -> Int64 {
         guard let handle = try? FileHandle(forReadingFrom: url) else { return startOffset }
@@ -69,11 +66,10 @@ final class ClaudeCostScanner {
             }
             i = data.index(after: i)
         }
-        return consumed  // trailing partial line (no newline) left for next scan
+        return consumed
     }
 
     nonisolated private func handleLine(_ lineData: Data, sinceKey: String, into buckets: inout DayModelBuckets) {
-        // Fast byte prefilter before JSON parse.
         guard lineData.range(of: Data(#""type":"assistant""#.utf8)) != nil,
               lineData.range(of: Data(#""usage""#.utf8)) != nil else { return }
         guard let obj = (try? JSONSerialization.jsonObject(with: lineData)) as? [String: Any],
