@@ -1,6 +1,22 @@
 import XCTest
 @testable import notchi
 
+final class CostHistoryStoreTests: XCTestCase {
+    @MainActor
+    func testStorePublishesReportFromInjectedScan() async {
+        var buckets: DayModelBuckets = [:]
+        buckets[DailyCostReport.dayKey(Date(), calendar: .current)] =
+            ["claude-opus-4": ModelTokenTotals(input: 10, output: 5, costNanos: 3_000_000_000,
+                                               requestCount: 1, pricedCount: 1)]
+        let store = CostHistoryStore(windowDays: 30, calendar: .current,
+            scanProvider: { _ in buckets })
+        await store.refresh()
+        XCTAssertEqual(store.report?.todayCostUSD ?? 0, 3.0, accuracy: 1e-9)
+        XCTAssertEqual(store.report?.topModel, "claude-opus-4")
+        XCTAssertFalse(store.isScanning)
+    }
+}
+
 final class DailyCostReportTests: XCTestCase {
     private func day(_ s: String) -> Date {
         let f = DateFormatter(); f.calendar = Calendar(identifier: .gregorian)
