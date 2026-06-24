@@ -64,6 +64,24 @@
       "cacheCreationPerTokenAboveThreshold": 0.0000125,
       "cacheReadPerTokenAboveThreshold": 0.000001
     },
+    "claude-opus-4-7": {
+      "inputPerToken": 0.000005,
+      "outputPerToken": 0.000025,
+      "cacheCreationPerToken": 0.00000625,
+      "cacheReadPerToken": 0.0000005
+    },
+    "claude-opus-4-8": {
+      "inputPerToken": 0.000005,
+      "outputPerToken": 0.000025,
+      "cacheCreationPerToken": 0.00000625,
+      "cacheReadPerToken": 0.0000005
+    },
+    "claude-fable-5": {
+      "inputPerToken": 0.00001,
+      "outputPerToken": 0.00005,
+      "cacheCreationPerToken": 0.0000125,
+      "cacheReadPerToken": 0.000001
+    },
     "claude-haiku-4-5": {
       "inputPerToken": 0.000001,
       "outputPerToken": 0.000005,
