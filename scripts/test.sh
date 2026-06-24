@@ -46,6 +46,7 @@ if [[ "$preset" == "focused" ]]; then
         "-only-testing:Tests/KeychainManagerTests"
         "-only-testing:Tests/NotchPanelManagerTests"
         "-only-testing:Tests/UsageBarViewTests"
+        "-only-testing:Tests/DailyCostReportTests"
     )
 fi
 
