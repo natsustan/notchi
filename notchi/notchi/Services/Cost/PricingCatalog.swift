@@ -118,7 +118,7 @@ final class PricingCatalog: ClaudePricingProviding, @unchecked Sendable {
                 cacheReadPerTokenAboveThreshold: firstTier.map { $0.cache_read / perMillion })
         }
 
-        guard isPlausibleRefresh(updated) else { return }
+        guard Self.isPlausibleRefresh(updated) else { return }
         replaceTable(updated)
     }
 
@@ -127,9 +127,11 @@ final class PricingCatalog: ClaudePricingProviding, @unchecked Sendable {
         table = updated
     }
 
-    private func isPlausibleRefresh(_ candidate: [String: ClaudeModelPricing]) -> Bool {
-        let hasSonnet4 = candidate["claude-sonnet-4"] != nil
+    // Symmetric prefix checks: models.dev may key Sonnet/Opus with version suffixes
+    // (e.g. claude-sonnet-4-5), so an exact-key match would silently reject every refresh.
+    static func isPlausibleRefresh(_ candidate: [String: ClaudeModelPricing]) -> Bool {
+        let hasSonnet4Family = candidate.keys.contains(where: { $0.hasPrefix("claude-sonnet-4") })
         let hasOpus4Family = candidate.keys.contains(where: { $0.hasPrefix("claude-opus-4") })
-        return hasSonnet4 && hasOpus4Family
+        return hasSonnet4Family && hasOpus4Family
     }
 }

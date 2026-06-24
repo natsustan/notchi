@@ -61,4 +61,22 @@ final class ClaudeModelPricingTests: XCTestCase {
         let catalog = PricingCatalog(fallbackBundle: .main)
         XCTAssertNil(catalog.pricing(model: "totally-made-up-model", on: Date()))
     }
+
+    func testPlausibilityGuardAcceptsBothAnchorsAndRejectsPartial() {
+        let anyPricing = ClaudeModelPricing(
+            inputPerToken: sonnetInput, outputPerToken: sonnetOutput,
+            cacheCreationPerToken: sonnetCacheWrite, cacheReadPerToken: sonnetCacheRead,
+            cacheCreation1hPerToken: nil, thresholdTokens: nil,
+            inputPerTokenAboveThreshold: nil, outputPerTokenAboveThreshold: nil,
+            cacheCreationPerTokenAboveThreshold: nil, cacheReadPerTokenAboveThreshold: nil)
+
+        // Versioned anchor keys must still pass (prefix match, not exact key).
+        let bothAnchors = ["claude-sonnet-4-5": anyPricing, "claude-opus-4-1": anyPricing]
+        XCTAssertTrue(PricingCatalog.isPlausibleRefresh(bothAnchors))
+
+        let sonnetOnly = ["claude-sonnet-4": anyPricing]
+        XCTAssertFalse(PricingCatalog.isPlausibleRefresh(sonnetOnly))
+
+        XCTAssertFalse(PricingCatalog.isPlausibleRefresh([:]))
+    }
 }
