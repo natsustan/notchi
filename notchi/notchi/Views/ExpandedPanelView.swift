@@ -433,26 +433,27 @@ struct ExpandedPanelView: View {
 
     @ViewBuilder
     private func usageDetailContent(geometry: GeometryProxy) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            if isActivityCollapsed {
-                Spacer()
-                    .allowsHitTesting(false)
-            } else {
-                Spacer()
-                    .frame(height: geometry.size.height * 0.3)
-                    .allowsHitTesting(false)
+        let headerClearance = isActivityCollapsed ? 8 : geometry.size.height * 0.3
+        VStack(spacing: 0) {
+            Spacer()
+                .frame(height: headerClearance)
+                .allowsHitTesting(false)
+
+            ScrollView(showsIndicators: false) {
+                UsageDetailView(
+                    claudeUsage: usageService,
+                    codexUsage: codexUsageService,
+                    costStore: CostHistoryStore.shared,
+                    defaultProvider: usageDetailDefaultProvider
+                )
+                .padding(.horizontal, 12)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-
-            UsageDetailView(
-                claudeUsage: usageService,
-                codexUsage: codexUsageService,
-                defaultProvider: usageDetailDefaultProvider
-            )
-            .padding(.horizontal, 12)
-
-            Spacer(minLength: 0)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     @ViewBuilder

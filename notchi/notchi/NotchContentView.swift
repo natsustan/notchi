@@ -461,7 +461,6 @@ struct NotchContentView: View {
                 showingPanelSettings = false
                 showingPanelSettingsDetail = false
                 showingSessionActivity = false
-                showingUsageDetail = false
                 hoveredSessionId = nil
             }
         }

@@ -110,4 +110,15 @@ final class UsageDisplayTests: XCTestCase {
         XCTAssertEqual(ExtraUsageRowView.currency(20), "$20")
         XCTAssertEqual(ExtraUsageRowView.currency(4.2), "$4.20")
     }
+
+    func testTokenFormatterUsesCompactSuffixes() {
+        XCTAssertEqual(CostStatFormatter.tokens(4_300_000_000), "4.3B")
+        XCTAssertEqual(CostStatFormatter.tokens(221_000_000), "221M")
+        XCTAssertEqual(CostStatFormatter.tokens(950), "950")
+    }
+
+    func testUsdFormatterTwoDecimalsWithThousands() {
+        XCTAssertEqual(CostStatFormatter.usd(3638.66), "$3,638.66")
+        XCTAssertEqual(CostStatFormatter.usd(174.41), "$174.41")
+    }
 }
