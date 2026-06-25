@@ -74,8 +74,7 @@ final class CostHistoryStore {
                                         to: calendar.startOfDay(for: now))!
         report = DailyCostReport.make(
             provider: .claude, buckets: buckets,
-            window: DateInterval(start: windowStart, end: now),
-            today: now, calendar: calendar)
+            windowStart: windowStart, today: now, calendar: calendar)
         lastScan = now
     }
 }

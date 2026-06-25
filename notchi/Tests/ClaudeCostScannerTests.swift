@@ -82,4 +82,20 @@ final class ClaudeCostScannerTests: XCTestCase {
                        "truncated file must trigger a clean full rescan, not double-count")
         XCTAssertEqual(second.buckets["2026-06-24"]?["claude-opus-4"]?.requestCount, 1)
     }
+
+    func testMessagesWithoutIdsAreNotDeduped() throws {
+        let noId = """
+        {"type":"assistant","timestamp":"2026-06-24T12:00:00.000Z",\
+        "message":{"model":"claude-opus-4-20250101",\
+        "usage":{"input_tokens":40,"output_tokens":0,\
+        "cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}
+        """
+        let url = try writeFile([noId, noId])
+        let s = scanner(root: url.deletingLastPathComponent().deletingLastPathComponent())
+        let out = s.scan(cache: CostUsageCache(version: CostUsageCache.currentVersion, files: [:], buckets: [:]),
+                         now: ISO8601DateFormatter().date(from: "2026-06-24T12:00:00Z")!)
+        XCTAssertEqual(out.buckets["2026-06-24"]?["claude-opus-4"]?.input, 80,
+                       "messages without ids cannot be deduped and must each count")
+        XCTAssertEqual(out.buckets["2026-06-24"]?["claude-opus-4"]?.requestCount, 2)
+    }
 }

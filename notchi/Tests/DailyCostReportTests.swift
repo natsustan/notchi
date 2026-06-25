@@ -38,8 +38,7 @@ final class DailyCostReportTests: XCTestCase {
         cal.timeZone = TimeZone(identifier: "UTC")!
         let report = DailyCostReport.make(
             provider: .claude, buckets: buckets,
-            window: DateInterval(start: day("2026-06-20"), end: day("2026-06-24")),
-            today: day("2026-06-24"), calendar: cal)
+            windowStart: day("2026-06-20"), today: day("2026-06-24"), calendar: cal)
 
         // window 06-20..06-24 → gap-filled ascending indices: 0=20, 1=21, 2=22, 3=23, 4=24
         XCTAssertEqual(report.entries.count, 5)

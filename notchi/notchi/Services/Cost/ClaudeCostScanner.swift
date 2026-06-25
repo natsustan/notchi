@@ -110,7 +110,7 @@ final class ClaudeCostScanner {
         let msgId = message["id"] as? String ?? ""
         let reqId = obj["requestId"] as? String ?? ""
         let dedupKey = msgId + "|" + reqId
-        if !dedupKey.isEmpty, !seen.insert(dedupKey).inserted { return }
+        if !(msgId.isEmpty && reqId.isEmpty), !seen.insert(dedupKey).inserted { return }
 
         let cost = pricing.pricing(model: model, on: date).map {
             CostPricing.claudeCostUSD(model: model, input: input, cacheRead: cacheRead,

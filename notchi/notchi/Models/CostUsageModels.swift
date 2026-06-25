@@ -57,10 +57,10 @@ nonisolated struct DailyCostReport: Equatable, Sendable {
 
     static func make(
         provider: CostProvider, buckets: DayModelBuckets,
-        window: DateInterval, today: Date, calendar: Calendar) -> DailyCostReport
+        windowStart: Date, today: Date, calendar: Calendar) -> DailyCostReport
     {
         var entries: [DayEntry] = []
-        var cursor = calendar.startOfDay(for: window.start)
+        var cursor = calendar.startOfDay(for: windowStart)
         let last = calendar.startOfDay(for: today)
         var modelCostNanos: [String: Int] = [:]
         while cursor <= last {
