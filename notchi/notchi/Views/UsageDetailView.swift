@@ -4,6 +4,7 @@ struct UsageDetailView: View {
     let claudeUsage: ClaudeUsageService
     let codexUsage: CodexUsageService
     let costStore: CostHistoryStore
+    let codexCostStore: CostHistoryStore
     let defaultProvider: AgentProvider
 
     @State private var selectedProvider: AgentProvider
@@ -12,11 +13,13 @@ struct UsageDetailView: View {
         claudeUsage: ClaudeUsageService,
         codexUsage: CodexUsageService,
         costStore: CostHistoryStore,
+        codexCostStore: CostHistoryStore,
         defaultProvider: AgentProvider
     ) {
         self.claudeUsage = claudeUsage
         self.codexUsage = codexUsage
         self.costStore = costStore
+        self.codexCostStore = codexCostStore
         self.defaultProvider = defaultProvider
         _selectedProvider = State(initialValue: defaultProvider)
     }
@@ -87,9 +90,7 @@ struct UsageDetailView: View {
             case .claude:
                 CostDashboardView(store: costStore)
             case .codex:
-                Text("Cost history coming soon")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                CostDashboardView(store: codexCostStore)
             }
 
             Divider().background(Color.white.opacity(0.08))
