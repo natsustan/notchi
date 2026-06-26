@@ -95,7 +95,8 @@ nonisolated final class CodexCostScanner {
                                         currentModel: inout String?,
                                         runningBaseline: inout (input: Int, cached: Int, output: Int)?,
                                         into buckets: inout DayModelBuckets) {
-        guard lineData.range(of: Data(#""type""#.utf8)) != nil else { return }
+        guard lineData.range(of: Data(#""token_count""#.utf8)) != nil
+            || lineData.range(of: Data(#""turn_context""#.utf8)) != nil else { return }
         guard let obj = (try? JSONSerialization.jsonObject(with: lineData)) as? [String: Any],
               let type_ = obj["type"] as? String else { return }
 
