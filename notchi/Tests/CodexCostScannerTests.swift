@@ -196,4 +196,41 @@ final class CodexCostScannerTests: XCTestCase {
                        "truncated file must trigger a clean full rescan, not double-count")
         XCTAssertEqual(secondCache.buckets["2026-06-24"]?["gpt-5"]?.input, 300)
     }
+
+    func testIncrementalScanPreservesModelAcrossWrites() throws {
+        let url = try writeFile([turnContextLine(model: "gpt-5.5")])
+        let root = url.deletingLastPathComponent().deletingLastPathComponent()
+        let s = scanner(root: root, pricing: Gpt55Price())
+        let first = s.scan(cache: emptyCache(), now: now())
+        XCTAssertNil(first.buckets["2026-06-24"]?["gpt-5.5"])
+
+        let fh = try FileHandle(forWritingTo: url); fh.seekToEndOfFile()
+        fh.write((tokenCountLine(lastUsage: (input: 1000, cached: 0, output: 500)) + "\n").data(using: .utf8)!)
+        try fh.close()
+        let second = s.scan(cache: first, now: now())
+
+        XCTAssertEqual(second.buckets["2026-06-24"]?["gpt-5.5"]?.input, 1000)
+        XCTAssertNil(second.buckets["2026-06-24"]?["gpt-5"],
+                     "model must persist across the scan boundary, not fall back to gpt-5")
+    }
+
+    func testIncrementalScanPreservesBaselineForTotalFallback() throws {
+        let url = try writeFile([
+            turnContextLine(model: "gpt-5"),
+            tokenCountLine(timestamp: "2026-06-24T12:00:00.000Z", lastUsage: nil, totalUsage: (input: 1000, cached: 0, output: 0)),
+        ])
+        let root = url.deletingLastPathComponent().deletingLastPathComponent()
+        let s = scanner(root: root)
+        let first = s.scan(cache: emptyCache(), now: now())
+        XCTAssertEqual(first.buckets["2026-06-24"]?["gpt-5"]?.input, 1000)
+
+        let fh = try FileHandle(forWritingTo: url); fh.seekToEndOfFile()
+        fh.write((tokenCountLine(timestamp: "2026-06-24T12:05:00.000Z", lastUsage: nil, totalUsage: (input: 1500, cached: 0, output: 0)) + "\n")
+            .data(using: .utf8)!)
+        try fh.close()
+        let second = s.scan(cache: first, now: now())
+
+        XCTAssertEqual(second.buckets["2026-06-24"]?["gpt-5"]?.input, 1500,
+                       "baseline must persist so the cumulative total yields a 500 delta, not 1500")
+    }
 }

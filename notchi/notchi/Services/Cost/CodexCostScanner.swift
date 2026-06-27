@@ -6,15 +6,6 @@ nonisolated final class CodexCostScanner {
     let windowDays: Int
     let calendar: Calendar
 
-    nonisolated(unsafe) private var seen = Set<String>()
-
-    nonisolated(unsafe) private let isoFractional: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-    nonisolated(unsafe) private let isoPlain = ISO8601DateFormatter()
-
     nonisolated init(projectsRoots: [URL], pricing: any ClaudePricingProviding, windowDays: Int, calendar: Calendar) {
         self.projectsRoots = projectsRoots
         self.pricing = pricing
@@ -25,7 +16,6 @@ nonisolated final class CodexCostScanner {
     nonisolated deinit {}
 
     nonisolated func scan(cache input: CostUsageCache, now: Date) -> CostUsageCache {
-        seen.removeAll()
         var cache = input
         if anyTrackedFileShrank(cache.files) {
             cache.files = [:]
@@ -34,6 +24,11 @@ nonisolated final class CodexCostScanner {
         let windowStart = calendar.date(byAdding: .day, value: -(windowDays - 1),
                                         to: calendar.startOfDay(for: now))!
         let sinceKey = DailyCostReport.dayKey(windowStart, calendar: calendar)
+
+        let isoFractional = ISO8601DateFormatter()
+        isoFractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let isoPlain = ISO8601DateFormatter()
+        var seen = Set<String>()
 
         for root in projectsRoots {
             guard let en = FileManager.default.enumerator(
@@ -46,8 +41,13 @@ nonisolated final class CodexCostScanner {
                 var state = cache.files[path] ?? .init(size: 0, mtime: 0, offset: 0)
                 if state.size == size, state.mtime == mtime { continue }
                 let startOffset = (size >= state.size) ? state.offset : 0
+                let resume = startOffset > 0 ? state.codexResume : nil
 
-                state.offset = parseFile(url: url, startOffset: startOffset, sinceKey: sinceKey, into: &cache.buckets)
+                let result = parseFile(url: url, startOffset: startOffset, sinceKey: sinceKey, resume: resume,
+                                       seen: &seen, isoFractional: isoFractional, isoPlain: isoPlain,
+                                       into: &cache.buckets)
+                state.offset = result.offset
+                state.codexResume = result.resume
                 state.size = size
                 state.mtime = mtime
                 cache.files[path] = state
@@ -66,34 +66,54 @@ nonisolated final class CodexCostScanner {
     }
 
     nonisolated private func parseFile(url: URL, startOffset: Int64, sinceKey: String,
-                                       into buckets: inout DayModelBuckets) -> Int64 {
-        guard let handle = try? FileHandle(forReadingFrom: url) else { return startOffset }
+                                       resume: CostUsageCache.CodexResume?,
+                                       seen: inout Set<String>,
+                                       isoFractional: ISO8601DateFormatter, isoPlain: ISO8601DateFormatter,
+                                       into buckets: inout DayModelBuckets) -> (offset: Int64, resume: CostUsageCache.CodexResume) {
+        var currentModel = resume?.model
+        var runningBaseline: (input: Int, cached: Int, output: Int)?
+        if let i = resume?.baseInput, let c = resume?.baseCached, let o = resume?.baseOutput {
+            runningBaseline = (i, c, o)
+        }
+
+        guard let handle = try? FileHandle(forReadingFrom: url) else {
+            return (startOffset, resumeState(currentModel, runningBaseline))
+        }
         defer { try? handle.close() }
         if startOffset > 0 { try? handle.seek(toOffset: UInt64(startOffset)) }
-        guard let data = try? handle.readToEnd(), !data.isEmpty else { return startOffset }
+        guard let data = try? handle.readToEnd(), !data.isEmpty else {
+            return (startOffset, resumeState(currentModel, runningBaseline))
+        }
 
         var consumed = startOffset
         var lineStart = data.startIndex
         let newline = UInt8(ascii: "\n")
         var i = data.startIndex
-        var currentModel: String? = nil
-        var runningBaseline: (input: Int, cached: Int, output: Int)? = nil
         while i < data.endIndex {
             if data[i] == newline {
                 let lineData = data[lineStart..<i]
                 consumed += Int64(lineData.count) + 1
                 handleLine(lineData, sinceKey: sinceKey, currentModel: &currentModel,
-                           runningBaseline: &runningBaseline, into: &buckets)
+                           runningBaseline: &runningBaseline, seen: &seen,
+                           isoFractional: isoFractional, isoPlain: isoPlain, into: &buckets)
                 lineStart = data.index(after: i)
             }
             i = data.index(after: i)
         }
-        return consumed
+        return (consumed, resumeState(currentModel, runningBaseline))
+    }
+
+    nonisolated private func resumeState(_ model: String?,
+                                         _ baseline: (input: Int, cached: Int, output: Int)?) -> CostUsageCache.CodexResume {
+        CostUsageCache.CodexResume(model: model, baseInput: baseline?.input,
+                                   baseCached: baseline?.cached, baseOutput: baseline?.output)
     }
 
     nonisolated private func handleLine(_ lineData: Data, sinceKey: String,
                                         currentModel: inout String?,
                                         runningBaseline: inout (input: Int, cached: Int, output: Int)?,
+                                        seen: inout Set<String>,
+                                        isoFractional: ISO8601DateFormatter, isoPlain: ISO8601DateFormatter,
                                         into buckets: inout DayModelBuckets) {
         guard lineData.range(of: Data(#""token_count""#.utf8)) != nil
             || lineData.range(of: Data(#""turn_context""#.utf8)) != nil else { return }
@@ -112,7 +132,7 @@ nonisolated final class CodexCostScanner {
               let payload = obj["payload"] as? [String: Any],
               payload["type"] as? String == "token_count",
               let ts = obj["timestamp"] as? String,
-              let date = parseTimestamp(ts) else { return }
+              let date = parseTimestamp(ts, isoFractional: isoFractional, isoPlain: isoPlain) else { return }
 
         let dayKey = DailyCostReport.dayKey(date, calendar: calendar)
         guard dayKey >= sinceKey else { return }
@@ -171,7 +191,8 @@ nonisolated final class CodexCostScanner {
 
     nonisolated private func intval(_ v: Any?) -> Int { (v as? NSNumber)?.intValue ?? 0 }
 
-    nonisolated private func parseTimestamp(_ s: String) -> Date? {
+    nonisolated private func parseTimestamp(_ s: String, isoFractional: ISO8601DateFormatter,
+                                            isoPlain: ISO8601DateFormatter) -> Date? {
         isoFractional.date(from: s) ?? isoPlain.date(from: s)
     }
 }
