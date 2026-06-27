@@ -221,11 +221,54 @@ final class NotchiStateMachineTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(promptSubmitTime.timeIntervalSince(session.sessionStartTime), 0.15)
     }
 
+    func testClaudeSessionStartDoesNotCreateVisibleSession() {
+        let stateMachine = NotchiStateMachine.shared
+        let sessionId = "claude-start-\(UUID().uuidString)"
+
+        stateMachine.handleEvent(makeEvent(
+            sessionId: sessionId,
+            event: .sessionStarted,
+            status: "processing"
+        ))
+
+        let sessionKey = ProviderSessionKey(provider: .claude, rawSessionId: sessionId)
+        XCTAssertNil(SessionStore.shared.session(for: sessionKey))
+        XCTAssertEqual(SessionStore.shared.activeSessionCount, 0)
+    }
+
+    func testClaudeVisibleSessionPreservesOriginalSessionStartTime() async throws {
+        let stateMachine = NotchiStateMachine.shared
+        let sessionId = "claude-visible-start-\(UUID().uuidString)"
+        let sessionKey = ProviderSessionKey(provider: .claude, rawSessionId: sessionId)
+
+        stateMachine.handleEvent(makeEvent(
+            sessionId: sessionId,
+            event: .sessionStarted,
+            status: "processing"
+        ))
+
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        stateMachine.handleEvent(makeEvent(
+            sessionId: sessionId,
+            event: .userPromptSubmitted,
+            status: "processing",
+            userPrompt: "hello"
+        ))
+
+        guard let session = SessionStore.shared.session(for: sessionKey),
+              let promptSubmitTime = session.promptSubmitTime else {
+            return XCTFail("Expected visible Claude session after first real event")
+        }
+
+        XCTAssertGreaterThanOrEqual(promptSubmitTime.timeIntervalSince(session.sessionStartTime), 0.15)
+    }
+
     func testStaleCodexSessionStartTimesAreTrimmedOnNextEvent() {
         let stateMachine = NotchiStateMachine.shared
         let staleKey = ProviderSessionKey(provider: .codex, rawSessionId: "stale-\(UUID().uuidString)")
 
-        stateMachine.setPendingCodexSessionStartTimeForTesting(
+        stateMachine.setPendingSessionStartTimeForTesting(
             Date(timeIntervalSinceNow: -11 * 60),
             sessionKey: staleKey
         )
@@ -236,7 +279,7 @@ final class NotchiStateMachineTests: XCTestCase {
             status: "processing"
         ))
 
-        XCTAssertNil(stateMachine.pendingCodexSessionStartTimeForTesting(sessionKey: staleKey))
+        XCTAssertNil(stateMachine.pendingSessionStartTimeForTesting(sessionKey: staleKey))
     }
 
     func testApplyingParsedCodexSessionEventsRecordsBashActivity() {

@@ -14,7 +14,7 @@ final class NotchiStateMachine {
     private var emotionDecayTimer: Task<Void, Never>?
     private var pendingSyncTasks: [ProviderSessionKey: Task<Void, Never>] = [:]
     private var pendingPositionMarks: [ProviderSessionKey: Task<Void, Never>] = [:]
-    private var pendingCodexSessionStartTimes: [ProviderSessionKey: Date] = [:]
+    private var pendingSessionStartTimes: [ProviderSessionKey: Date] = [:]
     private var codexProcessMonitorTask: Task<Void, Never>?
     private var codexThreadMetadataMonitorTask: Task<Void, Never>?
     private var codexThreadMetadataRefreshTask: Task<Void, Never>?
@@ -38,7 +38,7 @@ final class NotchiStateMachine {
     private static let codexThreadMetadataMonitorInterval: Duration = .seconds(5)
     private static let codexCompactionSignalRefreshDebounce: Duration = .milliseconds(150)
     private static let codexProcessMissLimit = 2
-    private static let pendingCodexSessionStartMaxAge: TimeInterval = 10 * 60
+    private static let pendingSessionStartMaxAge: TimeInterval = 10 * 60
 
     var currentState: NotchiState {
         sessionStore.effectiveSession?.state ?? .idle
@@ -50,7 +50,7 @@ final class NotchiStateMachine {
     }
 
     func handleEvent(_ event: HookEvent) {
-        trimPendingCodexSessionStartTimes()
+        trimPendingSessionStartTimes()
 
         let transcriptPath = ConversationParser.resolvedTranscriptPath(
             for: event.provider,
@@ -60,18 +60,25 @@ final class NotchiStateMachine {
         )
         let isDone = event.status == "waiting_for_input"
 
-        // WHY: Codex emits SessionStart before there is any user-visible content for a
-        // brand new chat. Start watching immediately, but don't surface a blank session
+        // WHY: SessionStart fires before there is any user-visible content for a
+        // brand new chat. Track it immediately, but don't surface a blank session
         // until later events give us real prompt/reply/tool content.
-        if event.provider == .codex,
-           event.event == .sessionStarted,
+        if event.event == .sessionStarted,
            sessionStore.session(for: event.sessionKey) == nil {
-            pendingCodexSessionStartTimes[event.sessionKey] = Date()
-            refreshCodexSessionStartTracking(
-                sessionKey: event.sessionKey,
-                transcriptPath: transcriptPath,
-                isInteractive: event.interactive ?? true
-            )
+            pendingSessionStartTimes[event.sessionKey] = Date()
+
+            switch event.provider {
+            case .codex:
+                refreshCodexSessionStartTracking(
+                    sessionKey: event.sessionKey,
+                    transcriptPath: transcriptPath,
+                    isInteractive: event.interactive ?? true
+                )
+            default:
+                if event.provider.capabilities.supportsUsageResumeTriggers {
+                    handleClaudeUsageResumeTrigger(.sessionStart)
+                }
+            }
 
             return
         }
@@ -158,7 +165,7 @@ final class NotchiStateMachine {
             }
 
         case .sessionEnded:
-            pendingCodexSessionStartTimes.removeValue(forKey: event.sessionKey)
+            pendingSessionStartTimes.removeValue(forKey: event.sessionKey)
             codexThreadMetadataImmediateRefreshKeys.remove(event.sessionKey)
             stopFileWatcher(sessionKey: event.sessionKey)
             pendingSyncTasks.removeValue(forKey: event.sessionKey)?.cancel()
@@ -227,17 +234,16 @@ final class NotchiStateMachine {
     }
 
     private func pendingSessionStartTimeOverride(for event: HookEvent) -> Date? {
-        guard event.provider == .codex,
-              sessionStore.session(for: event.sessionKey) == nil else {
+        guard sessionStore.session(for: event.sessionKey) == nil else {
             return nil
         }
 
-        return pendingCodexSessionStartTimes.removeValue(forKey: event.sessionKey)
+        return pendingSessionStartTimes.removeValue(forKey: event.sessionKey)
     }
 
-    private func trimPendingCodexSessionStartTimes(now: Date = Date()) {
-        let cutoff = now.addingTimeInterval(-Self.pendingCodexSessionStartMaxAge)
-        pendingCodexSessionStartTimes = pendingCodexSessionStartTimes.filter { _, startTime in
+    private func trimPendingSessionStartTimes(now: Date = Date()) {
+        let cutoff = now.addingTimeInterval(-Self.pendingSessionStartMaxAge)
+        pendingSessionStartTimes = pendingSessionStartTimes.filter { _, startTime in
             startTime >= cutoff
         }
     }
@@ -562,7 +568,7 @@ final class NotchiStateMachine {
         codexThreadMetadataImmediateRefreshKeys.removeAll()
         codexThreadMetadataAutoRefreshEnabled = true
         codexProcessMissCounts.removeAll()
-        pendingCodexSessionStartTimes.removeAll()
+        pendingSessionStartTimes.removeAll()
     }
 
 #if DEBUG
@@ -581,12 +587,12 @@ final class NotchiStateMachine {
         codexThreadMetadataAutoRefreshEnabled = enabled
     }
 
-    func setPendingCodexSessionStartTimeForTesting(_ startTime: Date, sessionKey: ProviderSessionKey) {
-        pendingCodexSessionStartTimes[sessionKey] = startTime
+    func setPendingSessionStartTimeForTesting(_ startTime: Date, sessionKey: ProviderSessionKey) {
+        pendingSessionStartTimes[sessionKey] = startTime
     }
 
-    func pendingCodexSessionStartTimeForTesting(sessionKey: ProviderSessionKey) -> Date? {
-        pendingCodexSessionStartTimes[sessionKey]
+    func pendingSessionStartTimeForTesting(sessionKey: ProviderSessionKey) -> Date? {
+        pendingSessionStartTimes[sessionKey]
     }
 #endif
 
