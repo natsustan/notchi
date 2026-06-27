@@ -15,6 +15,25 @@ final class CostHistoryStoreTests: XCTestCase {
         XCTAssertEqual(store.report?.topModel, "claude-opus-4")
         XCTAssertFalse(store.isScanning)
     }
+
+    @MainActor
+    func testRefreshStampsConfiguredProviderOnReport() async {
+        let buckets: DayModelBuckets = [
+            "2026-06-25": ["gpt-5.5": ModelTokenTotals(input: 100, output: 50, costNanos: 1_000,
+                                                       requestCount: 1, pricedCount: 1)]
+        ]
+        let store = CostHistoryStore(windowDays: 7, calendar: .current, provider: .codex,
+            scanProvider: { _ in buckets })
+        await store.refresh()
+        XCTAssertEqual(store.report?.provider, .codex)
+    }
+
+    @MainActor
+    func testRefreshDefaultsToClaudeProvider() async {
+        let store = CostHistoryStore(windowDays: 7, calendar: .current, scanProvider: { _ in [:] })
+        await store.refresh()
+        XCTAssertEqual(store.report?.provider, .claude)
+    }
 }
 
 final class DailyCostReportTests: XCTestCase {

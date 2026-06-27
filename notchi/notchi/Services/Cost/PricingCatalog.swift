@@ -1,5 +1,29 @@
 import Foundation
 
+nonisolated struct ProviderConfig: Sendable {
+    let fallbackResource: String
+    let modelsDevKey: ModelsDevKey
+    let plausibilityAnchors: [String]
+    let normalize: @Sendable (String) -> String
+    let snapshotFileName: String
+
+    enum ModelsDevKey: Sendable { case anthropic, openai }
+
+    static let claude = ProviderConfig(
+        fallbackResource: "claude-pricing-fallback",
+        modelsDevKey: .anthropic,
+        plausibilityAnchors: ["claude-sonnet-4", "claude-opus-4"],
+        normalize: CostPricing.normalizeClaudeModel,
+        snapshotFileName: "models-dev.json")
+
+    static let codex = ProviderConfig(
+        fallbackResource: "codex-pricing-fallback",
+        modelsDevKey: .openai,
+        plausibilityAnchors: ["gpt-5"],
+        normalize: CostPricing.normalizeOpenAIModel,
+        snapshotFileName: "models-dev-openai.json")
+}
+
 nonisolated final class PricingCatalog: ClaudePricingProviding, @unchecked Sendable {
     private struct Snapshot: Codable {
         let version: Int
@@ -48,6 +72,7 @@ nonisolated final class PricingCatalog: ClaudePricingProviding, @unchecked Senda
 
     private struct ModelsDev: Decodable {
         let anthropic: ModelsDev.Provider?
+        let openai: ModelsDev.Provider?
 
         struct Provider: Decodable {
             let models: [String: ModelsDev.ModelEntry]
@@ -82,9 +107,11 @@ nonisolated final class PricingCatalog: ClaudePricingProviding, @unchecked Senda
     private let lock = NSLock()
     private var table: [String: ClaudeModelPricing]
     private let snapshotURL: URL?
+    private let config: ProviderConfig
 
-    init(fallbackBundle: Bundle, snapshotURL: URL? = nil) {
-        table = Self.loadFallback(bundle: fallbackBundle)
+    init(config: ProviderConfig = .claude, fallbackBundle: Bundle, snapshotURL: URL? = nil) {
+        self.config = config
+        table = Self.loadFallback(bundle: fallbackBundle, config: config)
         if let url = snapshotURL, let overlay = Self.loadSnapshot(url: url) {
             table.merge(overlay) { _, new in new }
         }
@@ -92,12 +119,13 @@ nonisolated final class PricingCatalog: ClaudePricingProviding, @unchecked Senda
     }
 
     init(table: [String: ClaudeModelPricing]) {
+        self.config = .claude
         self.table = table
         self.snapshotURL = nil
     }
 
-    private static func loadFallback(bundle: Bundle) -> [String: ClaudeModelPricing] {
-        guard let url = bundle.url(forResource: "claude-pricing-fallback", withExtension: "json"),
+    private static func loadFallback(bundle: Bundle, config: ProviderConfig) -> [String: ClaudeModelPricing] {
+        guard let url = bundle.url(forResource: config.fallbackResource, withExtension: "json"),
               let data = try? Data(contentsOf: url),
               let snap = try? JSONDecoder().decode(Snapshot.self, from: data)
         else { return [:] }
@@ -116,8 +144,13 @@ nonisolated final class PricingCatalog: ClaudePricingProviding, @unchecked Senda
             .appendingPathComponent("CostUsage/models-dev.json")
     }
 
+    static func defaultSnapshotURL(for config: ProviderConfig) -> URL? {
+        FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+            .appendingPathComponent("CostUsage/\(config.snapshotFileName)")
+    }
+
     func pricing(model: String, on date: Date) -> ClaudeModelPricing? {
-        let key = CostPricing.normalizeClaudeModel(model)
+        let key = config.normalize(model)
         lock.lock(); defer { lock.unlock() }
         return table[key]
     }
@@ -125,15 +158,24 @@ nonisolated final class PricingCatalog: ClaudePricingProviding, @unchecked Senda
     func refreshFromNetwork() async {
         guard let url = URL(string: "https://models.dev/api.json") else { return }
         guard let (data, _) = try? await URLSession.shared.data(from: url) else { return }
-        guard let decoded = try? JSONDecoder().decode(ModelsDev.self, from: data),
-              let provider = decoded.anthropic else { return }
+        processNetworkData(data)
+    }
+
+    func processNetworkData(_ data: Data) {
+        guard let decoded = try? JSONDecoder().decode(ModelsDev.self, from: data) else { return }
+        let provider: ModelsDev.Provider?
+        switch config.modelsDevKey {
+        case .anthropic: provider = decoded.anthropic
+        case .openai: provider = decoded.openai
+        }
+        guard let provider else { return }
 
         let perMillion = 1_000_000.0
         var updated: [String: ClaudeModelPricing] = [:]
 
         for (rawId, entry) in provider.models {
             guard let cost = entry.cost else { continue }
-            let key = CostPricing.normalizeClaudeModel(rawId)
+            let key = config.normalize(rawId)
 
             let firstTier = cost.tiers?.first(where: { $0.tier?.type == "context" })
             let thresholdTokens = firstTier?.tier?.size
@@ -151,7 +193,7 @@ nonisolated final class PricingCatalog: ClaudePricingProviding, @unchecked Senda
                 cacheReadPerTokenAboveThreshold: firstTier.map { $0.cache_read / perMillion })
         }
 
-        guard Self.isPlausibleRefresh(updated) else { return }
+        guard Self.isPlausibleRefresh(updated, anchors: config.plausibilityAnchors) else { return }
         persistSnapshot(mergeIntoTable(updated))
     }
 
@@ -195,8 +237,10 @@ nonisolated final class PricingCatalog: ClaudePricingProviding, @unchecked Senda
     }
 
     static func isPlausibleRefresh(_ candidate: [String: ClaudeModelPricing]) -> Bool {
-        let hasSonnet4Family = candidate.keys.contains(where: { $0.hasPrefix("claude-sonnet-4") })
-        let hasOpus4Family = candidate.keys.contains(where: { $0.hasPrefix("claude-opus-4") })
-        return hasSonnet4Family && hasOpus4Family
+        isPlausibleRefresh(candidate, anchors: ProviderConfig.claude.plausibilityAnchors)
+    }
+
+    static func isPlausibleRefresh(_ candidate: [String: ClaudeModelPricing], anchors: [String]) -> Bool {
+        anchors.allSatisfy { anchor in candidate.keys.contains(where: { $0.hasPrefix(anchor) }) }
     }
 }

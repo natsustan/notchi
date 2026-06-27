@@ -25,6 +25,13 @@ nonisolated enum CostPricing {
         return s
     }
 
+    static func normalizeOpenAIModel(_ raw: String) -> String {
+        var s = raw
+        if s.hasPrefix("openai/") { s = String(s.dropFirst("openai/".count)) }
+        if let r = s.range(of: #"-\d{4}-\d{2}-\d{2}$"#, options: .regularExpression) { s.removeSubrange(r) }
+        return s
+    }
+
     static func claudeCostUSD(
         model: String, input: Int, cacheRead: Int, cacheCreation: Int,
         cacheCreation1h: Int, output: Int, pricing: ClaudeModelPricing) -> Double?

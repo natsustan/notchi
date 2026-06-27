@@ -10,34 +10,33 @@ final class CostHistoryStore {
 
     private let windowDays: Int
     private let calendar: Calendar
+    private let provider: CostProvider
     private let scanProvider: @Sendable (Date) async -> DayModelBuckets
     private var timer: Timer?
     private let refreshInterval: TimeInterval = 90
     private let pricingCatalog: PricingCatalog?
 
-    init(windowDays: Int = 30, calendar: Calendar = .current,
+    init(windowDays: Int = 30, calendar: Calendar = .current, provider: CostProvider = .claude,
          scanProvider: @escaping @Sendable (Date) async -> DayModelBuckets) {
         self.windowDays = windowDays
         self.calendar = calendar
+        self.provider = provider
         self.scanProvider = scanProvider
         self.pricingCatalog = nil
     }
 
     convenience init(windowDays: Int = 30, calendar: Calendar = .current,
+                     provider: CostProvider = .claude,
                      pricing: PricingCatalog,
                      projectsRoots: [URL],
                      cacheURL: URL) {
-        let scanner = ClaudeCostScanner(
-            projectsRoots: projectsRoots,
-            pricing: pricing,
-            windowDays: windowDays,
-            calendar: calendar)
-
-        self.init(windowDays: windowDays, calendar: calendar, pricingCatalog: pricing) { now in
+        let scan = Self.makeScan(provider: provider, projectsRoots: projectsRoots,
+                                 pricing: pricing, windowDays: windowDays, calendar: calendar)
+        self.init(windowDays: windowDays, calendar: calendar, provider: provider, pricingCatalog: pricing) { now in
             await Task.detached(priority: .utility) {
                 let sig = pricing.signature()
                 let cache = CostUsageCacheStore.load(url: cacheURL).reconciled(withPricingSignature: sig)
-                var updated = scanner.scan(cache: cache, now: now)
+                var updated = scan(cache, now)
                 updated.pricingSignature = sig
                 CostUsageCacheStore.save(updated, to: cacheURL)
                 return updated.buckets
@@ -45,10 +44,25 @@ final class CostHistoryStore {
         }
     }
 
-    private init(windowDays: Int, calendar: Calendar, pricingCatalog: PricingCatalog,
+    private static func makeScan(provider: CostProvider, projectsRoots: [URL], pricing: PricingCatalog,
+                                 windowDays: Int, calendar: Calendar) -> @Sendable (CostUsageCache, Date) -> CostUsageCache {
+        switch provider {
+        case .claude:
+            let scanner = ClaudeCostScanner(projectsRoots: projectsRoots, pricing: pricing,
+                                            windowDays: windowDays, calendar: calendar)
+            return { scanner.scan(cache: $0, now: $1) }
+        case .codex:
+            let scanner = CodexCostScanner(projectsRoots: projectsRoots, pricing: pricing,
+                                           windowDays: windowDays, calendar: calendar)
+            return { scanner.scan(cache: $0, now: $1) }
+        }
+    }
+
+    private init(windowDays: Int, calendar: Calendar, provider: CostProvider, pricingCatalog: PricingCatalog,
                  scanProvider: @escaping @Sendable (Date) async -> DayModelBuckets) {
         self.windowDays = windowDays
         self.calendar = calendar
+        self.provider = provider
         self.scanProvider = scanProvider
         self.pricingCatalog = pricingCatalog
     }
@@ -73,27 +87,40 @@ final class CostHistoryStore {
         let windowStart = calendar.date(byAdding: .day, value: -(windowDays - 1),
                                         to: calendar.startOfDay(for: now))!
         report = DailyCostReport.make(
-            provider: .claude, buckets: buckets,
+            provider: provider, buckets: buckets,
             windowStart: windowStart, today: now, calendar: calendar)
         lastScan = now
     }
 }
 
-// MARK: - Shared singleton
+// MARK: - Shared singletons
 
 extension CostHistoryStore {
-    static let shared: CostHistoryStore = {
-        let pricing = PricingCatalog(fallbackBundle: .main,
-                                     snapshotURL: PricingCatalog.defaultSnapshotURL())
-        let projectsRoot = URL(fileURLWithPath: NSHomeDirectory())
-            .appendingPathComponent(".claude/projects", isDirectory: true)
-        let cacheURL: URL
+    static let shared = makeStore(
+        provider: .claude, config: .claude,
+        projectsRoots: [homeURL(".claude/projects")], cacheFile: "claude.json")
+
+    static let sharedCodex = makeStore(
+        provider: .codex, config: .codex,
+        projectsRoots: [homeURL(".codex/sessions"), homeURL(".codex/archived_sessions")],
+        cacheFile: "codex.json")
+
+    private static func homeURL(_ sub: String) -> URL {
+        URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(sub, isDirectory: true)
+    }
+
+    private static func cacheURL(_ file: String) -> URL {
         if let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            cacheURL = cachesDir.appendingPathComponent("CostUsage/claude.json")
-        } else {
-            cacheURL = URL(fileURLWithPath: NSHomeDirectory())
-                .appendingPathComponent(".notchi/CostUsage/claude.json")
+            return cachesDir.appendingPathComponent("CostUsage/\(file)")
         }
-        return CostHistoryStore(pricing: pricing, projectsRoots: [projectsRoot], cacheURL: cacheURL)
-    }()
+        return URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".notchi/CostUsage/\(file)")
+    }
+
+    private static func makeStore(provider: CostProvider, config: ProviderConfig,
+                                  projectsRoots: [URL], cacheFile: String) -> CostHistoryStore {
+        let pricing = PricingCatalog(config: config, fallbackBundle: .main,
+                                     snapshotURL: PricingCatalog.defaultSnapshotURL(for: config))
+        return CostHistoryStore(provider: provider, pricing: pricing,
+                                projectsRoots: projectsRoots, cacheURL: cacheURL(cacheFile))
+    }
 }

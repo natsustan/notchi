@@ -1,10 +1,18 @@
 import Foundation
 
 nonisolated struct CostUsageCache: Codable, Equatable {
+    nonisolated struct CodexResume: Codable, Equatable {
+        var model: String?
+        var baseInput: Int?
+        var baseCached: Int?
+        var baseOutput: Int?
+    }
+
     nonisolated struct FileState: Codable, Equatable {
         var size: Int64
         var mtime: Double
         var offset: Int64
+        var codexResume: CodexResume? = nil
     }
 
     static let currentVersion = 1

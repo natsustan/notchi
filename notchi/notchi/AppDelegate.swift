@@ -64,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, SPUUpdaterDelegate, SP
             await ClaudeUsageService.shared.startPolling()
             await CodexUsageService.shared.refreshFromAPI()
             await CostHistoryStore.shared.start()
+            await CostHistoryStore.sharedCodex.start()
         }
     }
 

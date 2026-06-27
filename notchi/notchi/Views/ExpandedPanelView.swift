@@ -444,6 +444,7 @@ struct ExpandedPanelView: View {
                     claudeUsage: usageService,
                     codexUsage: codexUsageService,
                     costStore: CostHistoryStore.shared,
+                    codexCostStore: CostHistoryStore.sharedCodex,
                     defaultProvider: usageDetailDefaultProvider
                 )
                 .padding(.horizontal, 12)

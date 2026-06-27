@@ -43,6 +43,7 @@ enum CostStatFormatter {
     static func modelName(_ raw: String) -> String {
         var s = raw
         if let slash = s.lastIndex(of: "/") { s = String(s[s.index(after: slash)...]) }
+        if s.lowercased().hasPrefix("gpt") { return "GPT" + s.dropFirst(3) }
         if s.hasPrefix("claude-") { s.removeFirst("claude-".count) }
         let parts = s.split(separator: "-").map(String.init)
         guard let family = parts.first, !family.isEmpty else { return raw }
@@ -109,8 +110,12 @@ struct CostDashboardView: View {
         .lineLimit(1)
     }
 
-    private static let barColor = Color(red: 0.85, green: 0.49, blue: 0.26)
-    private static let peakBarColor = Color(red: 0.97, green: 0.62, blue: 0.32)
+    private func accent(_ provider: CostProvider) -> Color {
+        provider == .codex ? TerminalColors.codexAccentDeep : TerminalColors.claudeOrangeDeep
+    }
+    private func peak(_ provider: CostProvider) -> Color {
+        provider == .codex ? TerminalColors.codexAccent : TerminalColors.claudeOrange
+    }
 
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -118,10 +123,10 @@ struct CostDashboardView: View {
         return f
     }()
 
-    private func barColor(for e: DailyCostReport.DayEntry, maxCost: Double) -> Color {
-        if let s = selected, s.id == e.id { return Self.peakBarColor }
-        if e.costUSD >= maxCost && maxCost > 0 { return Self.peakBarColor }
-        return Self.barColor
+    private func barColor(for e: DailyCostReport.DayEntry, maxCost: Double, provider: CostProvider) -> Color {
+        if let s = selected, s.id == e.id { return peak(provider) }
+        if e.costUSD >= maxCost && maxCost > 0 { return peak(provider) }
+        return accent(provider)
     }
 
     private func nearest(to date: Date, in entries: [DailyCostReport.DayEntry]) -> DailyCostReport.DayEntry? {
@@ -134,7 +139,7 @@ struct CostDashboardView: View {
         let maxCost = r.entries.map(\.costUSD).max() ?? 0
         Chart(r.entries) { e in
             BarMark(x: .value("Day", e.date, unit: .day), y: .value("Cost", e.costUSD))
-                .foregroundStyle(barColor(for: e, maxCost: maxCost))
+                .foregroundStyle(barColor(for: e, maxCost: maxCost, provider: r.provider))
         }
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
