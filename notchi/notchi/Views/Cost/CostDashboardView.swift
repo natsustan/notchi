@@ -110,13 +110,12 @@ struct CostDashboardView: View {
         .lineLimit(1)
     }
 
-    private static let claudeBar = Color(red: 0.85, green: 0.49, blue: 0.26)
-    private static let claudePeak = Color(red: 0.97, green: 0.62, blue: 0.32)
-    private static let codexBar = Color(red: 0.18, green: 0.64, blue: 0.52)
-    private static let codexPeak = Color(red: 0.30, green: 0.80, blue: 0.66)
-
-    private func accent(_ provider: CostProvider) -> Color { provider == .codex ? Self.codexBar : Self.claudeBar }
-    private func peak(_ provider: CostProvider) -> Color { provider == .codex ? Self.codexPeak : Self.claudePeak }
+    private func accent(_ provider: CostProvider) -> Color {
+        provider == .codex ? TerminalColors.codexAccentDeep : TerminalColors.claudeOrangeDeep
+    }
+    private func peak(_ provider: CostProvider) -> Color {
+        provider == .codex ? TerminalColors.codexAccent : TerminalColors.claudeOrange
+    }
 
     private static let dayFormatter: DateFormatter = {
         let f = DateFormatter()
