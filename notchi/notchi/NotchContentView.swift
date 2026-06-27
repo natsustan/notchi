@@ -87,6 +87,7 @@ struct NotchContentView: View {
     var stateMachine: NotchiStateMachine = .shared
     var panelManager: NotchPanelManager = .shared
     var usageService: ClaudeUsageService = .shared
+    var codexUsageService: CodexUsageService = .shared
     var haptics: HapticService = .shared
     @Environment(\.accessibilityReduceMotion) private var accessibilityReduceMotion
     @ObservedObject private var updateManager = UpdateManager.shared
@@ -300,10 +301,18 @@ struct NotchContentView: View {
         max(0, notchSize.height - 12) + 24
     }
 
+    private var ringProvider: AgentProvider {
+        activeSession?.provider ?? .claude
+    }
+
+    private var ringIsStale: Bool {
+        ringProvider == .codex ? codexUsageService.isUsageStale : usageService.isUsageStale
+    }
+
     private var usageRingPercentage: Int? {
-        guard AppSettings.isUsageEnabled,
-              let usage = usageService.currentUsage else { return nil }
-        return usage.usagePercentage
+        guard AppSettings.isUsageEnabled else { return nil }
+        let usage = ringProvider == .codex ? codexUsageService.currentUsage : usageService.currentUsage
+        return usage?.usagePercentage
     }
 
     private var compactContentWidth: CGFloat {
@@ -638,7 +647,7 @@ struct NotchContentView: View {
     private func ringSlot(side: NotchSide) -> some View {
         let _ = logRingState(side: side)
         if let usageRingPercentage, !isLaunchWaveActive {
-            UsageRingView(percentage: usageRingPercentage, isStale: usageService.isUsageStale)
+            UsageRingView(percentage: usageRingPercentage, isStale: ringIsStale)
                 .opacity(collapsedHeaderSpriteVisuals.opacity)
                 .animation(collapsedHeaderSpriteVisibilityAnimation, value: isExpanded)
                 .frame(width: sideWidth)
