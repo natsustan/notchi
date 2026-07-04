@@ -212,7 +212,7 @@ struct ExpandedPanelView: View {
         UsageMetrics.claudeHasData(
             usage: usageService.currentUsage,
             weeklyUsage: usageService.currentWeeklyUsage,
-            sonnetUsage: usageService.currentSonnetUsage,
+            modelUsage: usageService.currentModelUsage,
             extraUsage: usageService.currentExtraUsage
         )
             || UsageMetrics.codexHasData(

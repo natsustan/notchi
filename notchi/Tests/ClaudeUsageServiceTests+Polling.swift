@@ -20,7 +20,7 @@ extension ClaudeUsageServiceTests {
         XCTAssertEqual(service.currentWeeklyUsage?.usagePercentage, 58)
     }
 
-    func testSuccessfulFetchPublishesSonnetUsageFromSevenDaySonnet() async throws {
+    func testSuccessfulFetchPublishesModelUsageFromSevenDaySonnet() async throws {
         let dependencies = makeDependencies(
             scheduler: PollSchedulerSpy(),
             resolveUserAgent: { "claude-code/2.1.77" },
@@ -33,10 +33,85 @@ extension ClaudeUsageServiceTests {
 
         await service.performFetch(with: "token")
 
-        XCTAssertEqual(service.currentSonnetUsage?.usagePercentage, 22)
+        XCTAssertEqual(service.currentModelUsage?.usagePercentage, 22)
+        XCTAssertEqual(service.currentModelUsageName, "Sonnet")
     }
 
-    func testSuccessfulFetchWithoutSevenDaySonnetLeavesSonnetUsageNil() async throws {
+    func testSuccessfulFetchPublishesModelUsageFromScopedWeeklyLimit() async throws {
+        let dependencies = makeDependencies(
+            scheduler: PollSchedulerSpy(),
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { _ in
+                (
+                    self.makeSuccessPayload(
+                        utilization: 42,
+                        weeklyUtilization: 58,
+                        scopedWeeklyLimit: (modelName: "Fable", percent: 59)
+                    ),
+                    self.makeResponse(statusCode: 200)
+                )
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(service.currentModelUsage?.usagePercentage, 59)
+        XCTAssertEqual(service.currentModelUsageName, "Fable")
+    }
+
+    func testSevenDayOpusTakesPrecedenceOverSevenDaySonnet() async throws {
+        let dependencies = makeDependencies(
+            scheduler: PollSchedulerSpy(),
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { _ in
+                (
+                    self.makeSuccessPayload(
+                        utilization: 42,
+                        weeklyUtilization: 58,
+                        sonnetUtilization: 22,
+                        opusUtilization: 31
+                    ),
+                    self.makeResponse(statusCode: 200)
+                )
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(service.currentModelUsage?.usagePercentage, 31)
+        XCTAssertEqual(service.currentModelUsageName, "Opus")
+    }
+
+    func testScopedWeeklyLimitTakesPrecedenceOverSevenDaySonnet() async throws {
+        let dependencies = makeDependencies(
+            scheduler: PollSchedulerSpy(),
+            resolveUserAgent: { "claude-code/2.1.77" },
+            fetchUsage: { _ in
+                (
+                    self.makeSuccessPayload(
+                        utilization: 42,
+                        weeklyUtilization: 58,
+                        sonnetUtilization: 22,
+                        scopedWeeklyLimit: (modelName: "Fable", percent: 59)
+                    ),
+                    self.makeResponse(statusCode: 200)
+                )
+            }
+        )
+
+        let service = ClaudeUsageService(dependencies: dependencies)
+
+        await service.performFetch(with: "token")
+
+        XCTAssertEqual(service.currentModelUsage?.usagePercentage, 59)
+        XCTAssertEqual(service.currentModelUsageName, "Fable")
+    }
+
+    func testSuccessfulFetchWithoutModelBucketLeavesModelUsageNil() async throws {
         let dependencies = makeDependencies(
             scheduler: PollSchedulerSpy(),
             resolveUserAgent: { "claude-code/2.1.77" },
@@ -49,7 +124,8 @@ extension ClaudeUsageServiceTests {
 
         await service.performFetch(with: "token")
 
-        XCTAssertNil(service.currentSonnetUsage)
+        XCTAssertNil(service.currentModelUsage)
+        XCTAssertNil(service.currentModelUsageName)
     }
 
     func testSuccessfulFetchWithoutSevenDayLeavesWeeklyUsageNil() async throws {

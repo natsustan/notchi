@@ -28,7 +28,7 @@ struct UsageDetailView: View {
         UsageMetrics.claudeHasData(
             usage: claudeUsage.currentUsage,
             weeklyUsage: claudeUsage.currentWeeklyUsage,
-            sonnetUsage: claudeUsage.currentSonnetUsage,
+            modelUsage: claudeUsage.currentModelUsage,
             extraUsage: claudeUsage.currentExtraUsage
         )
     }
@@ -60,7 +60,11 @@ struct UsageDetailView: View {
             return [
                 UsageMetrics.periodDisplay(title: "Session", usage: claudeUsage.currentUsage, isStale: stale),
                 UsageMetrics.periodDisplay(title: "Weekly", usage: claudeUsage.currentWeeklyUsage, isStale: heldOver),
-                UsageMetrics.periodDisplay(title: "Sonnet", usage: claudeUsage.currentSonnetUsage, isStale: heldOver),
+                UsageMetrics.periodDisplay(
+                    title: claudeUsage.currentModelUsageName ?? "Model",
+                    usage: claudeUsage.currentModelUsage,
+                    isStale: heldOver
+                ),
             ].compactMap { $0 }
         case .codex:
             let stale = codexUsage.isUsageStale
@@ -88,9 +92,9 @@ struct UsageDetailView: View {
 
             switch resolvedProvider {
             case .claude:
-                CostDashboardView(store: costStore)
+                CostDashboardView(store: costStore, sizingPeerStore: codexCostStore)
             case .codex:
-                CostDashboardView(store: codexCostStore)
+                CostDashboardView(store: codexCostStore, sizingPeerStore: costStore)
             }
 
             Divider().background(Color.white.opacity(0.08))
