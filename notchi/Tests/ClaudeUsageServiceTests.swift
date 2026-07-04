@@ -200,6 +200,8 @@ final class ClaudeUsageServiceTests: XCTestCase {
         weeklyUtilization: Double? = nil,
         weeklyResetAt: String = "2099-01-08T01:00:00Z",
         sonnetUtilization: Double? = nil,
+        opusUtilization: Double? = nil,
+        scopedWeeklyLimit: (modelName: String, percent: Double)? = nil,
         extraUsage: ExtraUsage? = nil
     ) -> Data {
         var payload: [String: Any] = [
@@ -214,6 +216,39 @@ final class ClaudeUsageServiceTests: XCTestCase {
 
         if let sonnetUtilization {
             payload["seven_day_sonnet"] = ["utilization": sonnetUtilization]
+        }
+
+        if let opusUtilization {
+            payload["seven_day_opus"] = ["utilization": opusUtilization]
+        }
+
+        if let scopedWeeklyLimit {
+            payload["limits"] = [
+                [
+                    "kind": "session",
+                    "percent": utilization,
+                    "resets_at": resetAt,
+                    "scope": NSNull(),
+                ],
+                [
+                    "kind": "weekly_all",
+                    "percent": weeklyUtilization ?? 0,
+                    "resets_at": weeklyResetAt,
+                    "scope": NSNull(),
+                ],
+                [
+                    "kind": "weekly_scoped",
+                    "percent": scopedWeeklyLimit.percent,
+                    "resets_at": weeklyResetAt,
+                    "scope": [
+                        "model": [
+                            "id": NSNull(),
+                            "display_name": scopedWeeklyLimit.modelName,
+                        ],
+                        "surface": NSNull(),
+                    ],
+                ] as [String: Any],
+            ]
         }
 
         if let extraUsage {
@@ -240,7 +275,8 @@ final class ClaudeUsageServiceTests: XCTestCase {
         isHeadersFallbackActive: Bool = false,
         lastGoodUsage: QuotaPeriod? = nil,
         lastGoodWeeklyUsage: QuotaPeriod? = nil,
-        lastGoodSonnetUsage: QuotaPeriod? = nil,
+        lastGoodModelUsage: QuotaPeriod? = nil,
+        lastGoodModelUsageName: String? = nil,
         lastGoodExtraUsage: ExtraUsage? = nil,
         lastObservedExtraUsageCredits: Double? = nil,
         extraUsageResetMarker: String? = nil,
@@ -252,7 +288,8 @@ final class ClaudeUsageServiceTests: XCTestCase {
             isHeadersFallbackActive: isHeadersFallbackActive,
             lastGoodUsage: lastGoodUsage,
             lastGoodWeeklyUsage: lastGoodWeeklyUsage,
-            lastGoodSonnetUsage: lastGoodSonnetUsage,
+            lastGoodModelUsage: lastGoodModelUsage,
+            lastGoodModelUsageName: lastGoodModelUsageName,
             lastGoodExtraUsage: lastGoodExtraUsage,
             lastObservedExtraUsageCredits: lastObservedExtraUsageCredits,
             extraUsageResetMarker: extraUsageResetMarker,

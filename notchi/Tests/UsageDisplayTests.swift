@@ -84,19 +84,19 @@ final class UsageDisplayTests: XCTestCase {
         let usage = QuotaPeriod(utilization: 10, resetDate: futureReset)
         let extra = ExtraUsage(isEnabled: true, monthlyLimit: 20, usedCredits: 5, utilization: nil)
 
-        XCTAssertTrue(UsageMetrics.claudeHasData(usage: usage, weeklyUsage: nil, sonnetUsage: nil, extraUsage: nil))
-        XCTAssertTrue(UsageMetrics.claudeHasData(usage: nil, weeklyUsage: usage, sonnetUsage: nil, extraUsage: nil))
-        XCTAssertTrue(UsageMetrics.claudeHasData(usage: nil, weeklyUsage: nil, sonnetUsage: nil, extraUsage: extra))
+        XCTAssertTrue(UsageMetrics.claudeHasData(usage: usage, weeklyUsage: nil, modelUsage: nil, extraUsage: nil))
+        XCTAssertTrue(UsageMetrics.claudeHasData(usage: nil, weeklyUsage: usage, modelUsage: nil, extraUsage: nil))
+        XCTAssertTrue(UsageMetrics.claudeHasData(usage: nil, weeklyUsage: nil, modelUsage: nil, extraUsage: extra))
     }
 
-    func testClaudeHasDataTrueForSonnetOnlyData() {
-        let sonnet = QuotaPeriod(utilization: 0, resetDate: nil)
-        XCTAssertTrue(UsageMetrics.claudeHasData(usage: nil, weeklyUsage: nil, sonnetUsage: sonnet, extraUsage: nil))
+    func testClaudeHasDataTrueForModelOnlyData() {
+        let model = QuotaPeriod(utilization: 0, resetDate: nil)
+        XCTAssertTrue(UsageMetrics.claudeHasData(usage: nil, weeklyUsage: nil, modelUsage: model, extraUsage: nil))
     }
 
     func testClaudeHasDataFalseWhenNoUsableData() {
         let disabledExtra = ExtraUsage(isEnabled: false, monthlyLimit: 20, usedCredits: 5, utilization: nil)
-        XCTAssertFalse(UsageMetrics.claudeHasData(usage: nil, weeklyUsage: nil, sonnetUsage: nil, extraUsage: disabledExtra))
+        XCTAssertFalse(UsageMetrics.claudeHasData(usage: nil, weeklyUsage: nil, modelUsage: nil, extraUsage: disabledExtra))
     }
 
     func testCodexHasDataReflectsPeriodPresence() {

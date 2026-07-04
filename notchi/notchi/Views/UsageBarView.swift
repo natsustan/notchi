@@ -186,6 +186,11 @@ struct UsageBarView: View {
                                 .foregroundColor(TerminalColors.red.opacity(0.85))
                                 .lineLimit(1)
                         }
+                        if onOpenDetail != nil {
+                            Image(systemName: "chart.bar.xaxis")
+                                .font(.system(size: 10, weight: .medium))
+                                .foregroundColor(TerminalColors.secondaryText)
+                        }
                         if usage != nil {
                             Text("\(effectivePercentage)%")
                                 .font(.system(size: 11, weight: .semibold, design: .monospaced))

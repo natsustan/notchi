@@ -29,8 +29,8 @@ nonisolated enum UsageMetrics {
         )
     }
 
-    static func claudeHasData(usage: QuotaPeriod?, weeklyUsage: QuotaPeriod?, sonnetUsage: QuotaPeriod?, extraUsage: ExtraUsage?) -> Bool {
-        usage != nil || weeklyUsage != nil || sonnetUsage != nil || extraUsageDisplay(extraUsage) != nil
+    static func claudeHasData(usage: QuotaPeriod?, weeklyUsage: QuotaPeriod?, modelUsage: QuotaPeriod?, extraUsage: ExtraUsage?) -> Bool {
+        usage != nil || weeklyUsage != nil || modelUsage != nil || extraUsageDisplay(extraUsage) != nil
     }
 
     static func codexHasData(usage: QuotaPeriod?, weeklyUsage: QuotaPeriod?) -> Bool {

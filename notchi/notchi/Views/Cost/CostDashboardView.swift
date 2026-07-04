@@ -56,6 +56,7 @@ enum CostStatFormatter {
 @MainActor
 struct CostDashboardView: View {
     let store: CostHistoryStore
+    var sizingPeerStore: CostHistoryStore?
 
     @State private var selected: DailyCostReport.DayEntry?
 
@@ -63,7 +64,6 @@ struct CostDashboardView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let report = store.report {
                 statsRow(report)
-                hoverDetail(report)
                 chart(report)
                 if report.entries.contains(where: { $0.requestCount > 0 && $0.pricedFraction < 1 }) {
                     Text("Some models lack pricing — cost is partial")
@@ -78,36 +78,73 @@ struct CostDashboardView: View {
         }
     }
 
+    private static let statColumnWeights: [CGFloat] = [0.20, 0.19, 0.23, 0.19, 0.19]
+    private static let statSpacing: CGFloat = 12
+    private static let statValueBaseSize: CGFloat = 15
+
+    private static func statItems(
+        _ r: DailyCostReport,
+        selected: DailyCostReport.DayEntry?
+    ) -> [(title: String, value: String)] {
+        [
+            (
+                selected.map { dayFormatter.string(from: $0.date) } ?? "Today",
+                CostStatFormatter.usd(selected?.costUSD ?? r.todayCostUSD)
+            ),
+            (
+                selected.map { "\(dayFormatter.string(from: $0.date)) toks" } ?? "Today's toks",
+                CostStatFormatter.tokens(selected?.totalTokens ?? r.latestTokens)
+            ),
+            ("30d", CostStatFormatter.usd(r.windowCostUSD)),
+            ("30d toks", CostStatFormatter.tokens(r.windowTokens)),
+            ("Top model", r.topModel.map(CostStatFormatter.modelName) ?? "—"),
+        ]
+    }
+
     @ViewBuilder private func statsRow(_ r: DailyCostReport) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            stat("Today", CostStatFormatter.usd(r.todayCostUSD))
-            stat("30d cost", CostStatFormatter.usd(r.windowCostUSD))
-            stat("30d tokens", CostStatFormatter.tokens(r.windowTokens))
-            stat("Latest tokens", CostStatFormatter.tokens(r.latestTokens))
-            stat("Top model", r.topModel.map(CostStatFormatter.modelName) ?? "—")
+        let items = Self.statItems(r, selected: selected)
+        let peerValues = sizingPeerStore?.report.map { Self.statItems($0, selected: nil).map(\.value) } ?? []
+        GeometryReader { geo in
+            let available = geo.size.width - Self.statSpacing * CGFloat(items.count - 1)
+            let widths = Self.statColumnWeights.map { $0 * available }
+            let valueSize = Self.fittedValueFontSize(
+                valueSets: [items.map(\.value), peerValues],
+                widths: widths
+            )
+            HStack(alignment: .top, spacing: Self.statSpacing) {
+                ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                    stat(item.title, item.value, valueSize: valueSize)
+                        .frame(width: widths[index], alignment: .leading)
+                }
+            }
         }
+        .frame(height: 34)
     }
 
-    private func stat(_ title: String, _ value: String) -> some View {
+    private static let statLayoutSafetyMargin: CGFloat = 2
+
+    private static func fittedValueFontSize(valueSets: [[String]], widths: [CGFloat]) -> CGFloat {
+        let pairs = valueSets.flatMap { Array(zip($0, widths)) }
+        var size = statValueBaseSize
+        while size > 8 {
+            let font = NSFont.systemFont(ofSize: size, weight: .semibold)
+            let fits = pairs.allSatisfy { value, width in
+                (value as NSString).size(withAttributes: [.font: font]).width <= width - statLayoutSafetyMargin
+            }
+            if fits { return size }
+            size -= 1
+        }
+        return size
+    }
+
+    private func stat(_ title: String, _ value: String, valueSize: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption2).foregroundStyle(TerminalColors.dimmedText)
-                .lineLimit(1).minimumScaleFactor(0.7)
-            Text(value).font(.system(size: 15, weight: .semibold))
+            Text(title).font(.caption2).foregroundStyle(TerminalColors.secondaryText)
+                .lineLimit(1)
+            Text(value).font(.system(size: valueSize, weight: .semibold))
                 .foregroundStyle(TerminalColors.primaryText)
-                .lineLimit(1).minimumScaleFactor(0.7)
+                .lineLimit(1)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    @ViewBuilder private func hoverDetail(_ r: DailyCostReport) -> some View {
-        Text(selected.map { s in
-            "\(Self.dayFormatter.string(from: s.date)) · "
-                + "\(CostStatFormatter.usd(s.costUSD)) · "
-                + "\(CostStatFormatter.tokens(s.totalTokens)) tok"
-        } ?? " ")
-        .font(.caption2)
-        .foregroundStyle(TerminalColors.primaryText)
-        .lineLimit(1)
     }
 
     private func accent(_ provider: CostProvider) -> Color {
@@ -123,9 +160,8 @@ struct CostDashboardView: View {
         return f
     }()
 
-    private func barColor(for e: DailyCostReport.DayEntry, maxCost: Double, provider: CostProvider) -> Color {
+    private func barColor(for e: DailyCostReport.DayEntry, provider: CostProvider) -> Color {
         if let s = selected, s.id == e.id { return peak(provider) }
-        if e.costUSD >= maxCost && maxCost > 0 { return peak(provider) }
         return accent(provider)
     }
 
@@ -136,15 +172,14 @@ struct CostDashboardView: View {
     }
 
     @ViewBuilder private func chart(_ r: DailyCostReport) -> some View {
-        let maxCost = r.entries.map(\.costUSD).max() ?? 0
         Chart(r.entries) { e in
             BarMark(x: .value("Day", e.date, unit: .day), y: .value("Cost", e.costUSD))
-                .foregroundStyle(barColor(for: e, maxCost: maxCost, provider: r.provider))
+                .foregroundStyle(barColor(for: e, provider: r.provider))
         }
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
         .chartLegend(.hidden)
-        .frame(height: 90)
+        .frame(height: 105)
         .chartOverlay { proxy in
             GeometryReader { geo in
                 Rectangle()

@@ -28,7 +28,7 @@ struct UsageDetailView: View {
         UsageMetrics.claudeHasData(
             usage: claudeUsage.currentUsage,
             weeklyUsage: claudeUsage.currentWeeklyUsage,
-            sonnetUsage: claudeUsage.currentSonnetUsage,
+            modelUsage: claudeUsage.currentModelUsage,
             extraUsage: claudeUsage.currentExtraUsage
         )
     }
@@ -60,7 +60,11 @@ struct UsageDetailView: View {
             return [
                 UsageMetrics.periodDisplay(title: "Session", usage: claudeUsage.currentUsage, isStale: stale),
                 UsageMetrics.periodDisplay(title: "Weekly", usage: claudeUsage.currentWeeklyUsage, isStale: heldOver),
-                UsageMetrics.periodDisplay(title: "Sonnet", usage: claudeUsage.currentSonnetUsage, isStale: heldOver),
+                UsageMetrics.periodDisplay(
+                    title: claudeUsage.currentModelUsageName ?? "Model",
+                    usage: claudeUsage.currentModelUsage,
+                    isStale: heldOver
+                ),
             ].compactMap { $0 }
         case .codex:
             let stale = codexUsage.isUsageStale
@@ -82,32 +86,56 @@ struct UsageDetailView: View {
             : nil
     }
 
+    private var costDashboardStores: (store: CostHistoryStore, peer: CostHistoryStore) {
+        switch resolvedProvider {
+        case .claude: (costStore, codexCostStore)
+        case .codex: (codexCostStore, costStore)
+        }
+    }
+
+    private var usageRowCount: Int {
+        periods.count + (extraUsage == nil ? 0 : 1) + (codexCreditsUSD == nil ? 0 : 1)
+    }
+
+    @ViewBuilder private var usageRows: some View {
+        ForEach(periods, id: \.title) { period in
+            UsagePeriodRowView(display: period)
+        }
+
+        if let extraUsage {
+            ExtraUsageRowView(display: extraUsage)
+        }
+
+        if let codexCreditsUSD {
+            CodexCreditsRowView(remainingUSD: codexCreditsUSD)
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
+                .padding(.bottom, -4)
 
-            switch resolvedProvider {
-            case .claude:
-                CostDashboardView(store: costStore)
-            case .codex:
-                CostDashboardView(store: codexCostStore)
-            }
+            CostDashboardView(
+                store: costDashboardStores.store,
+                sizingPeerStore: costDashboardStores.peer
+            )
+            .padding(.bottom, 2)
 
-            Divider().background(Color.white.opacity(0.08))
-
-            ForEach(periods, id: \.title) { period in
-                UsagePeriodRowView(display: period)
-            }
-
-            if let extraUsage {
-                ExtraUsageRowView(display: extraUsage)
-            }
-
-            if let codexCreditsUSD {
-                CodexCreditsRowView(remainingUSD: codexCreditsUSD)
+            if usageRowCount >= 3 {
+                LazyVGrid(
+                    columns: [
+                        GridItem(.flexible(), spacing: 14, alignment: .topLeading),
+                        GridItem(.flexible(), alignment: .topLeading),
+                    ],
+                    spacing: 12
+                ) {
+                    usageRows
+                }
+            } else {
+                usageRows
             }
         }
-        .padding(.top, 8)
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
@@ -130,13 +158,13 @@ struct UsageDetailView: View {
             ForEach([AgentProvider.claude, .codex], id: \.self) { provider in
                 Button(action: { selectedProvider = provider }) {
                     Text(provider.displayName)
-                        .font(.system(size: 13, weight: .semibold))
+                        .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(
                             resolvedProvider == provider
                                 ? TerminalColors.primaryText
                                 : TerminalColors.dimmedText
                         )
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 6)
                         .padding(.vertical, 4)
                         .background(
                             RoundedRectangle(cornerRadius: 6)
@@ -146,6 +174,7 @@ struct UsageDetailView: View {
                 .buttonStyle(.plain)
             }
         }
+        .padding(.leading, -6)
     }
 }
 
@@ -163,7 +192,7 @@ private struct UsageProgressBar: View {
                     .frame(width: geometry.size.width * Double(min(max(percentUsed, 0), 100)) / 100)
             }
         }
-        .frame(height: 6)
+        .frame(height: 5)
     }
 }
 
@@ -181,11 +210,11 @@ struct UsagePeriodRowView: View {
                     .foregroundColor(TerminalColors.primaryText)
                 if display.isStale {
                     Text("stale data")
-                        .font(.system(size: 11))
+                        .font(.system(size: 10))
                         .foregroundColor(TerminalColors.secondaryText)
                 } else if let resetText = display.resetText {
                     Text(resetText)
-                        .font(.system(size: 11))
+                        .font(.system(size: 10))
                         .foregroundColor(TerminalColors.secondaryText)
                 }
                 Spacer()
@@ -215,7 +244,7 @@ struct ExtraUsageRowView: View {
                 Text("\(Self.currency(display.monthlyLimit)) limit")
                     .foregroundColor(TerminalColors.secondaryText)
             }
-            .font(.system(size: 11))
+            .font(.system(size: 10))
         }
     }
 
@@ -231,7 +260,7 @@ struct CodexCreditsRowView: View {
     let remainingUSD: Double
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 3) {
             Text("Extra usage")
                 .font(.system(size: 14, weight: .semibold))
                 .foregroundColor(TerminalColors.primaryText)
@@ -240,7 +269,7 @@ struct CodexCreditsRowView: View {
                     .foregroundColor(TerminalColors.secondaryText)
                 Spacer()
             }
-            .font(.system(size: 11))
+            .font(.system(size: 10))
         }
     }
 }

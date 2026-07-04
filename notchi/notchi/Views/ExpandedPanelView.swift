@@ -212,7 +212,7 @@ struct ExpandedPanelView: View {
         UsageMetrics.claudeHasData(
             usage: usageService.currentUsage,
             weeklyUsage: usageService.currentWeeklyUsage,
-            sonnetUsage: usageService.currentSonnetUsage,
+            modelUsage: usageService.currentModelUsage,
             extraUsage: usageService.currentExtraUsage
         )
             || UsageMetrics.codexHasData(
@@ -439,19 +439,16 @@ struct ExpandedPanelView: View {
                 .frame(height: headerClearance)
                 .allowsHitTesting(false)
 
-            ScrollView(showsIndicators: false) {
-                UsageDetailView(
-                    claudeUsage: usageService,
-                    codexUsage: codexUsageService,
-                    costStore: CostHistoryStore.shared,
-                    codexCostStore: CostHistoryStore.sharedCodex,
-                    defaultProvider: usageDetailDefaultProvider
-                )
-                .padding(.horizontal, 12)
-                .padding(.top, 8)
-                .padding(.bottom, 12)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
-            }
+            UsageDetailView(
+                claudeUsage: usageService,
+                codexUsage: codexUsageService,
+                costStore: CostHistoryStore.shared,
+                codexCostStore: CostHistoryStore.sharedCodex,
+                defaultProvider: usageDetailDefaultProvider
+            )
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)

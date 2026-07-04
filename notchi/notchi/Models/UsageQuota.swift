@@ -3,14 +3,58 @@ import Foundation
 nonisolated struct UsageResponse: Decodable {
     let fiveHour: QuotaPeriod?
     let sevenDay: QuotaPeriod?
+    let sevenDayOpus: QuotaPeriod?
     let sevenDaySonnet: QuotaPeriod?
     let extraUsage: ExtraUsage?
+    let limits: [UsageLimitEntry]?
 
     enum CodingKeys: String, CodingKey {
         case fiveHour = "five_hour"
         case sevenDay = "seven_day"
+        case sevenDayOpus = "seven_day_opus"
         case sevenDaySonnet = "seven_day_sonnet"
         case extraUsage = "extra_usage"
+        case limits
+    }
+
+    var modelWeekly: (name: String, period: QuotaPeriod)? {
+        if let entry = limits?.first(where: { $0.kind == "weekly_scoped" && $0.scope?.model != nil }) {
+            let name = entry.scope?.model?.displayName ?? "Model"
+            return (name, QuotaPeriod(utilization: entry.percent, resetsAt: entry.resetsAt))
+        }
+        if let sevenDayOpus {
+            return ("Opus", sevenDayOpus)
+        }
+        if let sevenDaySonnet {
+            return ("Sonnet", sevenDaySonnet)
+        }
+        return nil
+    }
+}
+
+nonisolated struct UsageLimitEntry: Decodable {
+    let kind: String
+    let percent: Double
+    let resetsAt: String?
+    let scope: Scope?
+
+    struct Scope: Decodable {
+        let model: Model?
+
+        struct Model: Decodable {
+            let displayName: String?
+
+            enum CodingKeys: String, CodingKey {
+                case displayName = "display_name"
+            }
+        }
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case kind
+        case percent
+        case resetsAt = "resets_at"
+        case scope
     }
 }
 
