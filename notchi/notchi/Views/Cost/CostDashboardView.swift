@@ -181,7 +181,7 @@ struct CostDashboardView: View {
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
         .chartLegend(.hidden)
-        .frame(height: 90)
+        .frame(height: 105)
         .chartOverlay { proxy in
             GeometryReader { geo in
                 Rectangle()
