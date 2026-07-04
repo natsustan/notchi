@@ -33,6 +33,9 @@ https://github.com/user-attachments/assets/e417bd40-cae8-47c0-998a-905166cf3513
    <img src="assets/emotion-settings.png" alt="Emotion analysis settings" width="400">
 
 6. Start using Claude Code or Codex and watch Notchi react
+7. Track usage by clicking on the usage bar
+
+   <img src="assets/usage-dashboard.png" alt="Usage dashboard with cost chart and quota bars" width="450">
 
 ## How it works
 
