@@ -1,5 +1,4 @@
 import SwiftUI
-import OSLog
 
 enum NotchConstants {
     static let expandedPanelSize = CGSize(width: 450, height: 450)
@@ -631,58 +630,8 @@ struct NotchContentView: View {
         }
     }
 
-    private static let ringDebugLogger = Logger(subsystem: "com.ruban.notchi", category: "ring-debug")
-    private static var lastRingDebugLine: String?
-    private static let ringDebugQueue = DispatchQueue(label: "com.ruban.notchi.ring-debug")
-    private static let ringDebugFileURL = FileManager.default.homeDirectoryForCurrentUser
-        .appendingPathComponent("Library/Logs/notchi-ring-debug.log")
-    private static let ringDebugTimestampFormatter: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    private func logRingState(side: NotchSide) {
-        guard side == .left else { return }
-
-        let visuals = collapsedHeaderSpriteVisuals
-        let gateHidden = usageRingPercentage == nil || isLaunchWaveActive
-        let effectivelyHidden = gateHidden || visuals.opacity < 0.01 || collapsedHeaderSpriteScale < 0.01
-
-        let handoff: String
-        if let spriteHandoff {
-            handoff = "handoff(dir=\(spriteHandoff.direction) matchesActive=\(activeSession?.id == spriteHandoff.sessionId) progress=\(String(format: "%.2f", spriteHandoffProgress)))"
-        } else {
-            handoff = "handoff=none"
-        }
-
-        let line = "effHidden=\(effectivelyHidden) gateHidden=\(gateHidden) pct=\(String(describing: usageRingPercentage)) opacity=\(String(format: "%.2f", visuals.opacity)) scale=\(String(format: "%.2f", collapsedHeaderSpriteScale)) launchWave=\(isLaunchWaveActive) expanded=\(isExpanded) compactIdle=\(isCompactIdle) leftSlot=\(leftContent.rawValue) enabled=\(AppSettings.isUsageEnabled) sessions=\(sessionStore.activeSessionCount) claudeUsage=\(usageService.currentUsage != nil) stale=\(usageService.isUsageStale) connected=\(usageService.isConnected) fallback=\(usageService.isUsingHeadersFallback) \(handoff)"
-
-        guard line != Self.lastRingDebugLine else { return }
-        Self.lastRingDebugLine = line
-        Self.ringDebugLogger.error("RING-DEBUG \(line, privacy: .public)")
-
-        let entry = "\(Self.ringDebugTimestampFormatter.string(from: Date())) RING-DEBUG \(line)\n"
-        Self.ringDebugQueue.async { Self.appendRingDebug(entry) }
-    }
-
-    private static func appendRingDebug(_ entry: String) {
-        guard let data = entry.data(using: .utf8) else { return }
-        try? FileManager.default.createDirectory(
-            at: ringDebugFileURL.deletingLastPathComponent(),
-            withIntermediateDirectories: true)
-        if let handle = try? FileHandle(forWritingTo: ringDebugFileURL) {
-            defer { try? handle.close() }
-            _ = try? handle.seekToEnd()
-            try? handle.write(contentsOf: data)
-        } else {
-            try? data.write(to: ringDebugFileURL)
-        }
-    }
-
     @ViewBuilder
     private func ringSlot(side: NotchSide) -> some View {
-        let _ = logRingState(side: side)
         if let usageRingPercentage, !isLaunchWaveActive {
             UsageRingView(percentage: usageRingPercentage, isStale: ringIsStale)
                 .opacity(collapsedHeaderSpriteVisuals.opacity)

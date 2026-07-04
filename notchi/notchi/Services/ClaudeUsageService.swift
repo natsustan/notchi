@@ -1280,6 +1280,7 @@ final class ClaudeUsageService {
             consecutiveRateLimits = 0
             clearOAuthBackoffState()
             isConnected = true
+            AppSettings.isUsageEnabled = true
             preferHeadersFallback = false
             clearTransientState()
             currentUsage = usageResponse.fiveHour
