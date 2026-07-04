@@ -139,7 +139,7 @@ struct CostDashboardView: View {
 
     private func stat(_ title: String, _ value: String, valueSize: CGFloat) -> some View {
         VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption2).foregroundStyle(TerminalColors.dimmedText)
+            Text(title).font(.caption2).foregroundStyle(TerminalColors.secondaryText)
                 .lineLimit(1)
             Text(value).font(.system(size: valueSize, weight: .semibold))
                 .foregroundStyle(TerminalColors.primaryText)
@@ -160,9 +160,8 @@ struct CostDashboardView: View {
         return f
     }()
 
-    private func barColor(for e: DailyCostReport.DayEntry, maxCost: Double, provider: CostProvider) -> Color {
+    private func barColor(for e: DailyCostReport.DayEntry, provider: CostProvider) -> Color {
         if let s = selected, s.id == e.id { return peak(provider) }
-        if e.costUSD >= maxCost && maxCost > 0 { return peak(provider) }
         return accent(provider)
     }
 
@@ -173,10 +172,9 @@ struct CostDashboardView: View {
     }
 
     @ViewBuilder private func chart(_ r: DailyCostReport) -> some View {
-        let maxCost = r.entries.map(\.costUSD).max() ?? 0
         Chart(r.entries) { e in
             BarMark(x: .value("Day", e.date, unit: .day), y: .value("Cost", e.costUSD))
-                .foregroundStyle(barColor(for: e, maxCost: maxCost, provider: r.provider))
+                .foregroundStyle(barColor(for: e, provider: r.provider))
         }
         .chartXAxis(.hidden)
         .chartYAxis(.hidden)
