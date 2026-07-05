@@ -2,6 +2,8 @@
 
 A macOS notch companion that reacts to Claude Code and Codex activity in real-time.
 
+[![Download for macOS](assets/download-macos.svg)][dmg]
+
 https://github.com/user-attachments/assets/e417bd40-cae8-47c0-998a-905166cf3513
 
 ## What it does
@@ -21,7 +23,7 @@ https://github.com/user-attachments/assets/e417bd40-cae8-47c0-998a-905166cf3513
 
 ## Install
 
-1. Download `Notchi-x.x.x.dmg` from the [latest GitHub Release](https://github.com/sk-ruban/notchi/releases/latest)
+1. [Download the latest DMG][dmg] (all versions are on the [releases page](https://github.com/sk-ruban/notchi/releases))
 2. Open the DMG and drag Notchi to Applications
 3. Launch Notchi — it auto-installs Claude Code and Codex hooks on first launch (whichever are present)
 4. If you use Claude Code, a macOS keychain popup will appear asking to access its cached OAuth token (used for API usage stats). Click **Always Allow** so it won't prompt again on future launches
@@ -65,3 +67,5 @@ If you have any bugs, ideas, or would like to contribute through pull requests, 
 ## License
 
 GPL-3.0-only. See [LICENSE](LICENSE).
+
+[dmg]: https://github.com/sk-ruban/notchi/releases/download/v1.2.0/Notchi-1.2.0.dmg
