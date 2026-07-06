@@ -93,7 +93,7 @@ struct CostDashboardView: View {
             ),
             (
                 selected.map { "\(dayFormatter.string(from: $0.date)) toks" } ?? "Today's toks",
-                CostStatFormatter.tokens(selected?.totalTokens ?? r.latestTokens)
+                CostStatFormatter.tokens(selected?.totalTokens ?? r.todayTokens)
             ),
             ("30d", CostStatFormatter.usd(r.windowCostUSD)),
             ("30d toks", CostStatFormatter.tokens(r.windowTokens)),

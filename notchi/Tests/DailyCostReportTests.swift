@@ -66,7 +66,22 @@ final class DailyCostReportTests: XCTestCase {
         XCTAssertEqual(report.windowCostUSD, 12.0, accuracy: 1e-9)     // 2 + 9 + 1
         XCTAssertEqual(report.windowTokens, 100 + 50 + 300 + 100 + 200 + 20)
         XCTAssertEqual(report.todayCostUSD, 10.0, accuracy: 1e-9)      // 24th: 9 + 1
-        XCTAssertEqual(report.latestTokens, 300 + 100 + 200 + 20)      // most recent active day = 24th
+        XCTAssertEqual(report.todayTokens, 300 + 100 + 200 + 20)      // 24th: all models summed
         XCTAssertEqual(report.topModel, "claude-opus-4")              // highest cost across window
+    }
+
+    func testTodayTokensAreZeroWhenTodayHasNoActivity() {
+        var buckets: DayModelBuckets = [:]
+        buckets["2026-06-24"] = ["gpt-5.5": ModelTokenTotals(
+            input: 300, output: 100, costNanos: 9_000_000_000, requestCount: 2, pricedCount: 2)]
+
+        var cal = Calendar(identifier: .gregorian)
+        cal.timeZone = TimeZone(identifier: "UTC")!
+        let report = DailyCostReport.make(
+            provider: .codex, buckets: buckets,
+            windowStart: day("2026-06-20"), today: day("2026-06-25"), calendar: cal)
+
+        XCTAssertEqual(report.todayCostUSD, 0, accuracy: 1e-9)
+        XCTAssertEqual(report.todayTokens, 0)
     }
 }

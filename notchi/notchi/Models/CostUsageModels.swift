@@ -48,7 +48,7 @@ nonisolated struct DailyCostReport: Equatable, Sendable {
     var windowCostUSD: Double { entries.reduce(0) { $0 + $1.costUSD } }
     var windowTokens: Int { entries.reduce(0) { $0 + $1.totalTokens } }
     var todayCostUSD: Double { entries.last?.costUSD ?? 0 }
-    var latestTokens: Int { entries.last(where: { $0.totalTokens > 0 })?.totalTokens ?? 0 }
+    var todayTokens: Int { entries.last?.totalTokens ?? 0 }
 
     static func dayKey(_ date: Date, calendar: Calendar) -> String {
         let c = calendar.dateComponents([.year, .month, .day], from: date)
