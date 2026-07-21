@@ -13,6 +13,7 @@ https://github.com/user-attachments/assets/e417bd40-cae8-47c0-998a-905166cf3513
 - Click to expand and see session time and usage quota
 - Supports multiple concurrent sessions, each with its own mascot from the Claude or Codex sprite family
 - Sound effects for events with support for importable custom sounds (optional, auto-muted when terminal is focused)
+- Available in English, Japanese, and Simplified / Traditional Chinese (follows your system language)
 - Auto-updates via Sparkle
 
 ## Requirements
@@ -68,4 +69,4 @@ If you have any bugs, ideas, or would like to contribute through pull requests, 
 
 GPL-3.0-only. See [LICENSE](LICENSE).
 
-[dmg]: https://github.com/sk-ruban/notchi/releases/download/v1.2.0/Notchi-1.2.0.dmg
+[dmg]: https://github.com/sk-ruban/notchi/releases/download/v1.2.1/Notchi-1.2.1.dmg
