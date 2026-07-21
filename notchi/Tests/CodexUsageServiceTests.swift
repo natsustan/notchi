@@ -15,10 +15,79 @@ final class CodexUsageServiceTests: XCTestCase {
 
         let snapshot = try XCTUnwrap(CodexUsageSnapshotResolver.latestSnapshot(transcriptPath: rolloutURL.path))
 
-        XCTAssertEqual(snapshot.usage.usagePercentage, 11)
+        XCTAssertEqual(snapshot.usage?.usagePercentage, 11)
         XCTAssertEqual(snapshot.weeklyUsage?.usagePercentage, 27)
         let weeklyReset = try XCTUnwrap(snapshot.weeklyUsage?.resetDate)
         XCTAssertEqual(weeklyReset.timeIntervalSince1970, 1_777_621_726, accuracy: 0.001)
+    }
+
+    func testResolverTreatsWeeklyWindowInPrimarySlotAsWeeklyUsage() throws {
+        let rolloutURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-usage-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: rolloutURL) }
+
+        let contents = """
+        {"timestamp":"2026-04-25T07:03:14.886Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":22.0,"window_minutes":10080,"resets_at":1777621726},"secondary":null}}}
+        """
+        try contents.write(to: rolloutURL, atomically: true, encoding: .utf8)
+
+        let snapshot = try XCTUnwrap(CodexUsageSnapshotResolver.latestSnapshot(transcriptPath: rolloutURL.path))
+
+        XCTAssertNil(snapshot.usage)
+        XCTAssertEqual(snapshot.weeklyUsage?.usagePercentage, 22)
+        let weeklyReset = try XCTUnwrap(snapshot.weeklyUsage?.resetDate)
+        XCTAssertEqual(weeklyReset.timeIntervalSince1970, 1_777_621_726, accuracy: 0.001)
+    }
+
+    func testResolverTreatsSoonerResetAsSessionWhenBothWindowsLackSize() throws {
+        let rolloutURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-usage-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: rolloutURL) }
+
+        let contents = """
+        {"timestamp":"2026-04-25T07:03:14.886Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":27.0,"resets_at":1777621726},"secondary":{"used_percent":11.0,"resets_at":1777103326}}}}
+        """
+        try contents.write(to: rolloutURL, atomically: true, encoding: .utf8)
+
+        let snapshot = try XCTUnwrap(CodexUsageSnapshotResolver.latestSnapshot(transcriptPath: rolloutURL.path))
+
+        XCTAssertEqual(snapshot.usage?.usagePercentage, 11)
+        XCTAssertEqual(snapshot.weeklyUsage?.usagePercentage, 27)
+    }
+
+    func testResolverTreatsLoneUnsizedWindowAsWeekly() throws {
+        let rolloutURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("codex-usage-\(UUID().uuidString).jsonl")
+        defer { try? FileManager.default.removeItem(at: rolloutURL) }
+
+        let contents = """
+        {"timestamp":"2026-04-25T07:03:14.886Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"primary":{"used_percent":22.0,"resets_at":1777621726}}}}
+        """
+        try contents.write(to: rolloutURL, atomically: true, encoding: .utf8)
+
+        let snapshot = try XCTUnwrap(CodexUsageSnapshotResolver.latestSnapshot(transcriptPath: rolloutURL.path))
+
+        XCTAssertNil(snapshot.usage)
+        XCTAssertEqual(snapshot.weeklyUsage?.usagePercentage, 22)
+    }
+
+    func testRefreshPublishesWeeklyOnlySnapshot() async {
+        let service = CodexUsageService(dependencies: CodexUsageServiceDependencies(
+            resolveUsage: { _ in
+                CodexUsageSnapshot(
+                    usage: nil,
+                    weeklyUsage: QuotaPeriod(utilization: 22, resetDate: Date(timeIntervalSince1970: 2_000)),
+                    observedAt: Date(timeIntervalSince1970: 1_000)
+                )
+            },
+            now: { Date(timeIntervalSince1970: 1_010) }
+        ))
+
+        await service.refresh(transcriptPaths: ["/tmp/rollout.jsonl"])
+
+        XCTAssertNil(service.currentUsage)
+        XCTAssertEqual(service.currentWeeklyUsage?.usagePercentage, 22)
+        XCTAssertTrue(service.hasUsageData)
     }
 
     func testResolverLeavesWeeklyUsageNilWhenSecondaryMissing() throws {
@@ -49,7 +118,7 @@ final class CodexUsageServiceTests: XCTestCase {
 
         let snapshot = try XCTUnwrap(CodexUsageSnapshotResolver.latestSnapshot(transcriptPath: rolloutURL.path))
 
-        XCTAssertEqual(snapshot.usage.usagePercentage, 11)
+        XCTAssertEqual(snapshot.usage?.usagePercentage, 11)
         XCTAssertEqual(snapshot.observedAt.timeIntervalSince1970, 1_777_100_594.886, accuracy: 0.001)
     }
 
@@ -67,7 +136,7 @@ final class CodexUsageServiceTests: XCTestCase {
 
         let snapshot = try XCTUnwrap(CodexUsageSnapshotResolver.latestSnapshot(transcriptPath: rolloutURL.path))
 
-        XCTAssertEqual(snapshot.usage.usagePercentage, 15)
+        XCTAssertEqual(snapshot.usage?.usagePercentage, 15)
     }
 
     func testResolverFindsLatestTokenCountInTailOfRolloutLargerThanWindow() throws {
@@ -87,7 +156,7 @@ final class CodexUsageServiceTests: XCTestCase {
             maxTailBytes: 512
         ))
 
-        XCTAssertEqual(snapshot.usage.usagePercentage, 42)
+        XCTAssertEqual(snapshot.usage?.usagePercentage, 42)
     }
 
     func testResolverKeepsTokenCountWhenTailWindowStartsOnLineBoundary() throws {
@@ -110,7 +179,7 @@ final class CodexUsageServiceTests: XCTestCase {
             maxTailBytes: maxTailBytes
         ))
 
-        XCTAssertEqual(snapshot.usage.usagePercentage, 42)
+        XCTAssertEqual(snapshot.usage?.usagePercentage, 42)
     }
 
     func testResolverIgnoresTokenCountOutsideTailWindow() throws {

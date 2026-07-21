@@ -86,9 +86,16 @@ nonisolated enum CodexUsageAPI {
             creditsBalance = nil
         }
 
+        let windows = CodexRateLimitWindows.split(
+            primary: response.rateLimit?.primaryWindow,
+            secondary: response.rateLimit?.secondaryWindow,
+            windowMinutes: { $0.windowMinutes },
+            resetDate: { $0.resetDate(now: now) }
+        )
+
         return CodexAPIUsage(
-            session: period(response.rateLimit?.primaryWindow),
-            weekly: period(response.rateLimit?.secondaryWindow),
+            session: period(windows.session),
+            weekly: period(windows.weekly),
             reviews: period(response.codeReviewRateLimit?.primaryWindow),
             creditsBalance: creditsBalance
         )
@@ -129,11 +136,13 @@ nonisolated struct CodexUsageAPIResponse: Decodable {
         let usedPercent: Double?
         let resetAt: Double?
         let resetAfterSeconds: Double?
+        let windowMinutes: Double?
 
         enum CodingKeys: String, CodingKey {
             case usedPercent = "used_percent"
             case resetAt = "reset_at"
             case resetAfterSeconds = "reset_after_seconds"
+            case windowMinutes = "window_minutes"
         }
 
         func resetDate(now: Date) -> Date? {

@@ -1,9 +1,52 @@
 import Foundation
 
 nonisolated struct CodexUsageSnapshot: Sendable, Equatable {
-    let usage: QuotaPeriod
+    let usage: QuotaPeriod?
     let weeklyUsage: QuotaPeriod?
     let observedAt: Date
+}
+
+nonisolated enum CodexRateLimitWindows {
+    private static let weeklyWindowMinimumMinutes: Double = 1440
+
+    static func split<Window>(
+        primary: Window?,
+        secondary: Window?,
+        windowMinutes: (Window) -> Double?,
+        resetDate: (Window) -> Date?
+    ) -> (session: Window?, weekly: Window?) {
+        var session: Window?
+        var weekly: Window?
+        var unsized: [Window] = []
+
+        for window in [primary, secondary].compactMap({ $0 }) {
+            guard let minutes = windowMinutes(window) else {
+                unsized.append(window)
+                continue
+            }
+            if minutes >= weeklyWindowMinimumMinutes {
+                weekly = weekly ?? window
+            } else {
+                session = session ?? window
+            }
+        }
+
+        if unsized.count > 1 {
+            let byReset = unsized.sorted {
+                (resetDate($0) ?? .distantFuture) < (resetDate($1) ?? .distantFuture)
+            }
+            session = byReset.first
+            weekly = byReset.last
+        } else if let lone = unsized.first {
+            if weekly == nil {
+                weekly = lone
+            } else {
+                session = lone
+            }
+        }
+
+        return (session, weekly)
+    }
 }
 
 nonisolated struct CodexUsageServiceDependencies: Sendable {
@@ -104,8 +147,8 @@ final class CodexUsageService {
         currentReviewsUsage = apiUsage.reviews
         currentExtraCreditsUSD = apiUsage.creditsBalance.map { $0 * CodexUsageAPI.creditUSDRate }
 
-        if includeSessionWeekly, let session = apiUsage.session {
-            currentUsage = session
+        if includeSessionWeekly, apiUsage.session != nil || apiUsage.weekly != nil {
+            currentUsage = apiUsage.session
             currentWeeklyUsage = apiUsage.weekly
             lastObservedAt = now
             isUsageStale = false
@@ -128,7 +171,7 @@ final class CodexUsageService {
     private func apply(_ snapshot: CodexUsageSnapshot?) {
         let now = dependencies.now()
 
-        if let snapshot, isUsageStillValid(snapshot.usage, now: now) {
+        if let snapshot, hasUnexpiredQuota(snapshot.usage, snapshot.weeklyUsage, now: now) {
             currentUsage = snapshot.usage
             currentWeeklyUsage = snapshot.weeklyUsage
             lastObservedAt = snapshot.observedAt
@@ -137,13 +180,17 @@ final class CodexUsageService {
             return
         }
 
-        guard isUsageStillValid(currentUsage, now: now) else {
+        guard hasUnexpiredQuota(currentUsage, currentWeeklyUsage, now: now) else {
             clear()
             return
         }
 
         isUsageStale = true
         statusMessage = nil
+    }
+
+    private func hasUnexpiredQuota(_ usage: QuotaPeriod?, _ weeklyUsage: QuotaPeriod?, now: Date) -> Bool {
+        isUsageStillValid(usage, now: now) || isUsageStillValid(weeklyUsage, now: now)
     }
 
     private func isUsageStillValid(_ usage: QuotaPeriod?, now: Date) -> Bool {
@@ -292,24 +339,22 @@ nonisolated enum CodexUsageSnapshotResolver {
             guard line.range(of: tokenCountMarker) != nil,
                   let event = try? decoder.decode(CodexTokenCountEvent.self, from: Data(line)),
                   event.payload?.type == "token_count",
-                  let primary = event.payload?.rateLimits?.primary,
+                  let rateLimits = event.payload?.rateLimits,
                   let observedAt = parseDate(event.timestamp) else {
                 continue
             }
 
-            let weeklyUsage = event.payload?.rateLimits?.secondary.map { secondary in
-                QuotaPeriod(
-                    utilization: secondary.usedPercent.rounded(),
-                    resetDate: Date(timeIntervalSince1970: secondary.resetsAt)
-                )
-            }
+            let windows = CodexRateLimitWindows.split(
+                primary: rateLimits.primary,
+                secondary: rateLimits.secondary,
+                windowMinutes: { $0.windowMinutes },
+                resetDate: { Date(timeIntervalSince1970: $0.resetsAt) }
+            )
+            guard windows.session != nil || windows.weekly != nil else { continue }
 
             let snapshot = CodexUsageSnapshot(
-                usage: QuotaPeriod(
-                    utilization: primary.usedPercent.rounded(),
-                    resetDate: Date(timeIntervalSince1970: primary.resetsAt)
-                ),
-                weeklyUsage: weeklyUsage,
+                usage: period(windows.session),
+                weeklyUsage: period(windows.weekly),
                 observedAt: observedAt
             )
             if latestSnapshot.map({ observedAt > $0.observedAt }) ?? true {
@@ -318,6 +363,14 @@ nonisolated enum CodexUsageSnapshotResolver {
         }
 
         return latestSnapshot
+    }
+
+    private static func period(_ limit: CodexTokenCountEvent.Limit?) -> QuotaPeriod? {
+        guard let limit else { return nil }
+        return QuotaPeriod(
+            utilization: limit.usedPercent.rounded(),
+            resetDate: Date(timeIntervalSince1970: limit.resetsAt)
+        )
     }
 
     private static func tailData(forFileAtPath path: String, maxBytes: Int) -> Data? {
@@ -379,10 +432,12 @@ private nonisolated struct CodexTokenCountEvent: Decodable {
     struct Limit: Decodable {
         let usedPercent: Double
         let resetsAt: TimeInterval
+        let windowMinutes: Double?
 
         enum CodingKeys: String, CodingKey {
             case usedPercent = "used_percent"
             case resetsAt = "resets_at"
+            case windowMinutes = "window_minutes"
         }
     }
 }

@@ -23,13 +23,13 @@ final class CodexUsageScannerTests: XCTestCase {
         let scanner = CodexUsageScanner()
 
         let initial = scanner.latestSnapshot(transcriptPaths: [rolloutURL.path])
-        XCTAssertEqual(initial?.usage.usagePercentage, 11)
+        XCTAssertEqual(initial?.usage?.usagePercentage, 11)
         XCTAssertEqual(scanner.bytesReadForTesting, UInt64(firstLine.utf8.count))
 
         try append(appendedLine, to: rolloutURL)
         let updated = scanner.latestSnapshot(transcriptPaths: [rolloutURL.path])
 
-        XCTAssertEqual(updated?.usage.usagePercentage, 23)
+        XCTAssertEqual(updated?.usage?.usagePercentage, 23)
         XCTAssertEqual(
             scanner.bytesReadForTesting,
             UInt64(firstLine.utf8.count + appendedLine.utf8.count)
@@ -46,7 +46,7 @@ final class CodexUsageScannerTests: XCTestCase {
         let second = scanner.latestSnapshot(transcriptPaths: [rolloutURL.path])
 
         XCTAssertEqual(first, second)
-        XCTAssertEqual(second?.usage.usagePercentage, 42)
+        XCTAssertEqual(second?.usage?.usagePercentage, 42)
         XCTAssertEqual(scanner.bytesReadForTesting, bytesAfterFirstScan)
     }
 
@@ -56,12 +56,12 @@ final class CodexUsageScannerTests: XCTestCase {
         try (longLine + longLine).write(to: rolloutURL, atomically: true, encoding: .utf8)
         let scanner = CodexUsageScanner()
 
-        XCTAssertEqual(scanner.latestSnapshot(transcriptPaths: [rolloutURL.path])?.usage.usagePercentage, 55)
+        XCTAssertEqual(scanner.latestSnapshot(transcriptPaths: [rolloutURL.path])?.usage?.usagePercentage, 55)
 
         try shortLine.write(to: rolloutURL, atomically: true, encoding: .utf8)
         let rescanned = scanner.latestSnapshot(transcriptPaths: [rolloutURL.path])
 
-        XCTAssertEqual(rescanned?.usage.usagePercentage, 8)
+        XCTAssertEqual(rescanned?.usage?.usagePercentage, 8)
         XCTAssertEqual(
             rescanned?.observedAt.timeIntervalSince1970 ?? 0,
             parseISO("2026-04-25T06:00:00.000Z").timeIntervalSince1970,
@@ -74,12 +74,12 @@ final class CodexUsageScannerTests: XCTestCase {
         try line.write(to: rolloutURL, atomically: true, encoding: .utf8)
         let scanner = CodexUsageScanner()
 
-        XCTAssertEqual(scanner.latestSnapshot(transcriptPaths: [rolloutURL.path])?.usage.usagePercentage, 33)
+        XCTAssertEqual(scanner.latestSnapshot(transcriptPaths: [rolloutURL.path])?.usage?.usagePercentage, 33)
 
         try append("{\"timestamp\":\"2026-04-25T07:04:00.000Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"agent_message\"}}\n", to: rolloutURL)
         let after = scanner.latestSnapshot(transcriptPaths: [rolloutURL.path])
 
-        XCTAssertEqual(after?.usage.usagePercentage, 33)
+        XCTAssertEqual(after?.usage?.usagePercentage, 33)
     }
 
     func testUnterminatedFinalLineIsNotSkippedOnceCompleted() throws {
@@ -89,12 +89,12 @@ final class CodexUsageScannerTests: XCTestCase {
         try (firstLine + String(secondLine[..<splitIndex])).write(to: rolloutURL, atomically: true, encoding: .utf8)
         let scanner = CodexUsageScanner()
 
-        XCTAssertEqual(scanner.latestSnapshot(transcriptPaths: [rolloutURL.path])?.usage.usagePercentage, 11)
+        XCTAssertEqual(scanner.latestSnapshot(transcriptPaths: [rolloutURL.path])?.usage?.usagePercentage, 11)
 
         try append(String(secondLine[splitIndex...]), to: rolloutURL)
         let completed = scanner.latestSnapshot(transcriptPaths: [rolloutURL.path])
 
-        XCTAssertEqual(completed?.usage.usagePercentage, 77)
+        XCTAssertEqual(completed?.usage?.usagePercentage, 77)
     }
 
     func testLatestSnapshotAcrossPathsPicksMostRecentObservation() throws {
@@ -109,7 +109,7 @@ final class CodexUsageScannerTests: XCTestCase {
 
         let snapshot = scanner.latestSnapshot(transcriptPaths: [olderURL.path, rolloutURL.path])
 
-        XCTAssertEqual(snapshot?.usage.usagePercentage, 61)
+        XCTAssertEqual(snapshot?.usage?.usagePercentage, 61)
     }
 
     private func tokenCountLine(usedPercent: Double, timestamp: String) -> String {

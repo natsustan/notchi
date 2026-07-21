@@ -220,6 +220,8 @@ struct UsagePeriodRowView: View {
                     Text(resetText)
                         .font(.system(size: 10))
                         .foregroundColor(TerminalColors.secondaryText)
+                        .lineLimit(1)
+                        .fixedSize()
                 }
                 Spacer()
                 Text("\(display.percentUsed)%")
