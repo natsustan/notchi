@@ -10,6 +10,15 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
         <language>en</language>
         <!-- Items will be added by generate_appcast -->
         <item>
+            <title>1.2.1</title>
+            <pubDate>Tue, 21 Jul 2026 07:37:05 +0000</pubDate>
+            <sparkle:version>13</sparkle:version>
+            <sparkle:shortVersionString>1.2.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:releaseNotesLink sparkle:edSignature="H1snrMz314FRtxPXCooISg0Fz9oQzVXyI1v5MWHWbZK7hIav5bMip9KXGUk4U4cIvZF08IVK6Cddi/Z1gCegCQ==" sparkle:length="1541">https://updates.notchi.app/sparkle-notes/Notchi-1.2.1.md</sparkle:releaseNotesLink>
+            <enclosure url="https://github.com/sk-ruban/notchi/releases/download/v1.2.1/Notchi-1.2.1.dmg" length="5280240" type="application/octet-stream" sparkle:edSignature="0fsNcPZ6yhLLC2Er4iFbdc0aPhi7XVMGcO1OdFElAoaRkpFuH0GYmw3A0hDVMVmAgBdLl7NV/iMWAuX3wWWTAg=="/>
+        </item>
+        <item>
             <title>1.2.0</title>
             <pubDate>Sat, 04 Jul 2026 14:50:52 +0000</pubDate>
             <sparkle:version>12</sparkle:version>
@@ -26,15 +35,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <sparkle:releaseNotesLink sparkle:edSignature="T7WUgRIaOBWRU44d1+ERx0kJE4MQitpQCkdGyppuZO0n4R46CtQgQta6aJ/Lr0EzdS+pIeLjcklUSIeE/EUFCQ==" sparkle:length="1566">https://updates.notchi.app/sparkle-notes/Notchi-1.1.4.md</sparkle:releaseNotesLink>
             <enclosure url="https://github.com/sk-ruban/notchi/releases/download/v1.1.4/Notchi-1.1.4.dmg" length="4822491" type="application/octet-stream" sparkle:edSignature="dlX3lprieN6tEQLoLXTCSVURinTCOOTp6RxNnPO9FQFIxpquPU5W2abKGYujKmMV7pBPA5lLNLQpGWB2rXR4DQ=="/>
-        </item>
-        <item>
-            <title>1.1.3</title>
-            <pubDate>Mon, 08 Jun 2026 17:04:37 +0000</pubDate>
-            <sparkle:version>10</sparkle:version>
-            <sparkle:shortVersionString>1.1.3</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:releaseNotesLink sparkle:edSignature="wt4OWQf514WlNy1Y0dKSAL3vWqHM4C8vaBppsD1hNKVpr+h8avX819yAyHxsL0zdjWX7q94xz0hE3efHOX7YBQ==" sparkle:length="1076">https://updates.notchi.app/sparkle-notes/Notchi-1.1.3.md</sparkle:releaseNotesLink>
-            <enclosure url="https://github.com/sk-ruban/notchi/releases/download/v1.1.3/Notchi-1.1.3.dmg" length="4747710" type="application/octet-stream" sparkle:edSignature="aO4BBiLahGfP5PAOqvFoIvvclhV+YGOWU5enu6FYom5kRO4R1qpJY9wxGltJtgwTNLsZGImpR0glRe1FkwmwCQ=="/>
         </item>
         <item>
             <title>1.0.4</title>
@@ -69,6 +69,6 @@ IMPORTANT: This file was signed by Sparkle. Any modifications to this file requi
     </channel>
 </rss>
 <!-- sparkle-signatures:
-edSignature: h9cYttftRy46H6y684+5akgCOuuys4iso1xRBnetjndP4oyCwKsuitWQt2pFmyYd5Vn4fAvj6y4yaYFBO79ICQ==
+edSignature: K43s1r+RityRuAF3nUVX8y1GudmEf7M+dlU+bXOmyijj388vjDZwrU40soeDpqQ34dPyahOiBpnHYe3hK/jYAg==
 length: 6034
 -->
