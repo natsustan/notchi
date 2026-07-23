@@ -13,7 +13,7 @@ https://github.com/user-attachments/assets/e417bd40-cae8-47c0-998a-905166cf3513
 - Click to expand and see session time and usage quota
 - Supports multiple concurrent sessions, each with its own mascot from the Claude or Codex sprite family
 - Sound effects for events with support for importable custom sounds (optional, auto-muted when terminal is focused)
-- Available in English, Japanese, and Simplified / Traditional Chinese (follows your system language)
+- Available in English, 日本語, 简体中文 / 繁體中文, 한국어, and Tiếng Việt (follows your system language)
 - Auto-updates via Sparkle
 
 ## Requirements
@@ -27,7 +27,7 @@ https://github.com/user-attachments/assets/e417bd40-cae8-47c0-998a-905166cf3513
 1. [Download the latest DMG][dmg] (all versions are on the [releases page](https://github.com/sk-ruban/notchi/releases))
 2. Open the DMG and drag Notchi to Applications
 3. Launch Notchi — it auto-installs Claude Code and Codex hooks on first launch (whichever are present)
-4. If you use Claude Code, a macOS keychain popup will appear asking to access its cached OAuth token (used for API usage stats). Click **Always Allow** so it won't prompt again on future launches
+4. If a macOS keychain popup appears asking for access (used for API usage stats), click **Always Allow** so it won't prompt again
 
    <img src="assets/keychain-popup.png" alt="Keychain access popup" width="450">
 
@@ -69,4 +69,4 @@ If you have any bugs, ideas, or would like to contribute through pull requests, 
 
 GPL-3.0-only. See [LICENSE](LICENSE).
 
-[dmg]: https://github.com/sk-ruban/notchi/releases/download/v1.2.1/Notchi-1.2.1.dmg
+[dmg]: https://github.com/sk-ruban/notchi/releases/download/v1.2.2/Notchi-1.2.2.dmg
