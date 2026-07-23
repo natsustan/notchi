@@ -304,7 +304,7 @@ struct ExpandedPanelView: View {
 
         let codex = includesCodex ? SharedUsageBarState(
             provider: .codex,
-            usage: codexUsageService.currentUsage,
+            usage: codexUsageService.displayUsage,
             isUsingExtraUsage: false,
             isLoading: false,
             error: nil,

@@ -90,6 +90,40 @@ final class CodexUsageServiceTests: XCTestCase {
         XCTAssertTrue(service.hasUsageData)
     }
 
+    func testDisplayUsageFallsBackToWeeklyWhenSessionQuotaMissing() async {
+        let service = CodexUsageService(dependencies: CodexUsageServiceDependencies(
+            resolveUsage: { _ in
+                CodexUsageSnapshot(
+                    usage: nil,
+                    weeklyUsage: QuotaPeriod(utilization: 22, resetDate: Date(timeIntervalSince1970: 2_000)),
+                    observedAt: Date(timeIntervalSince1970: 1_000)
+                )
+            },
+            now: { Date(timeIntervalSince1970: 1_010) }
+        ))
+
+        await service.refresh(transcriptPaths: ["/tmp/rollout.jsonl"])
+
+        XCTAssertEqual(service.displayUsage?.usagePercentage, 22)
+    }
+
+    func testDisplayUsagePrefersSessionQuotaWhenPresent() async {
+        let service = CodexUsageService(dependencies: CodexUsageServiceDependencies(
+            resolveUsage: { _ in
+                CodexUsageSnapshot(
+                    usage: QuotaPeriod(utilization: 61, resetDate: Date(timeIntervalSince1970: 1_500)),
+                    weeklyUsage: QuotaPeriod(utilization: 22, resetDate: Date(timeIntervalSince1970: 2_000)),
+                    observedAt: Date(timeIntervalSince1970: 1_000)
+                )
+            },
+            now: { Date(timeIntervalSince1970: 1_010) }
+        ))
+
+        await service.refresh(transcriptPaths: ["/tmp/rollout.jsonl"])
+
+        XCTAssertEqual(service.displayUsage?.usagePercentage, 61)
+    }
+
     func testResolverLeavesWeeklyUsageNilWhenSecondaryMissing() throws {
         let rolloutURL = FileManager.default.temporaryDirectory
             .appendingPathComponent("codex-usage-\(UUID().uuidString).jsonl")

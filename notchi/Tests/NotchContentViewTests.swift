@@ -67,6 +67,59 @@ final class NotchContentViewTests: XCTestCase {
         )
     }
 
+    func testRingUsageFallsBackToCodexWeeklyQuotaWhenSessionQuotaMissing() {
+        let weekly = QuotaPeriod(utilization: 40, resetsAt: nil)
+
+        XCTAssertEqual(
+            NotchContentView.collapsedRingUsage(
+                provider: .codex,
+                claudeUsage: nil,
+                codexSessionUsage: nil,
+                codexWeeklyUsage: weekly
+            ),
+            weekly
+        )
+    }
+
+    func testRingUsagePrefersCodexSessionQuotaOverWeekly() {
+        let session = QuotaPeriod(utilization: 62, resetsAt: nil)
+        let weekly = QuotaPeriod(utilization: 40, resetsAt: nil)
+
+        XCTAssertEqual(
+            NotchContentView.collapsedRingUsage(
+                provider: .codex,
+                claudeUsage: nil,
+                codexSessionUsage: session,
+                codexWeeklyUsage: weekly
+            ),
+            session
+        )
+    }
+
+    func testRingUsageUsesClaudeQuotaForClaudeProviderWithoutWeeklyFallback() {
+        let claude = QuotaPeriod(utilization: 55, resetsAt: nil)
+        let codexWeekly = QuotaPeriod(utilization: 40, resetsAt: nil)
+
+        XCTAssertEqual(
+            NotchContentView.collapsedRingUsage(
+                provider: .claude,
+                claudeUsage: claude,
+                codexSessionUsage: nil,
+                codexWeeklyUsage: codexWeekly
+            ),
+            claude
+        )
+
+        XCTAssertNil(
+            NotchContentView.collapsedRingUsage(
+                provider: .claude,
+                claudeUsage: nil,
+                codexSessionUsage: nil,
+                codexWeeklyUsage: codexWeekly
+            )
+        )
+    }
+
     func testGrassIslandRendersOnlyForExpandedActivityView() {
         XCTAssertTrue(
             NotchContentView.shouldRenderGrassIsland(

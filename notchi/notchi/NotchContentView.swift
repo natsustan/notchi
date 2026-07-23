@@ -346,10 +346,23 @@ struct NotchContentView: View {
         ringProvider == .codex ? codexUsageService.isUsageStale : usageService.isUsageStale
     }
 
+    static func collapsedRingUsage(
+        provider: AgentProvider,
+        claudeUsage: QuotaPeriod?,
+        codexSessionUsage: QuotaPeriod?,
+        codexWeeklyUsage: QuotaPeriod?
+    ) -> QuotaPeriod? {
+        provider == .codex ? (codexSessionUsage ?? codexWeeklyUsage) : claudeUsage
+    }
+
     private var usageRingPercentage: Int? {
         guard AppSettings.isUsageEnabled else { return nil }
-        let usage = ringProvider == .codex ? codexUsageService.currentUsage : usageService.currentUsage
-        return usage?.usagePercentage
+        return Self.collapsedRingUsage(
+            provider: ringProvider,
+            claudeUsage: usageService.currentUsage,
+            codexSessionUsage: codexUsageService.currentUsage,
+            codexWeeklyUsage: codexUsageService.currentWeeklyUsage
+        )?.usagePercentage
     }
 
     private var compactContentWidth: CGFloat {

@@ -99,6 +99,10 @@ final class CodexUsageService {
         UsageMetrics.codexHasData(usage: currentUsage, weeklyUsage: currentWeeklyUsage)
     }
 
+    var displayUsage: QuotaPeriod? {
+        currentUsage ?? currentWeeklyUsage
+    }
+
     private static let staleObservationInterval: TimeInterval = 15 * 60
 
     private static let apiUsageRefreshInterval: TimeInterval = 60
